@@ -22,11 +22,19 @@ class ApplicationController < ActionController::API
   end
 
   def normalize_hash!(hash)
-    hash.each_key do |key|
+    hash.keys.each do |key|
       new_key = key.to_s.underscore
       value   = hash.delete(key)
-      hash[new_key] = value.is_a?(ActionController::Parameters) ? normalize_hash!(value) : value
+      hash[new_key] = normalize_value(value)
     end
     hash
+  end
+
+  def normalize_value(value)
+    case value
+    when ActionController::Parameters then normalize_hash!(value)
+    when Array then value.map { |v| normalize_value(v) }
+    else value
+    end
   end
 end
