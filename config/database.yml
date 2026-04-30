@@ -80,6 +80,4 @@ test:
 #
 production:
   <<: *default
-  database: geo_ar_api_production
-  username: geo_ar_api
-  password: <%= ENV["GEO_AR_API_DATABASE_PASSWORD"] %>
+  url: <%= ENV["DATABASE_URL"] %>
