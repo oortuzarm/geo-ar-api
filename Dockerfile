@@ -25,16 +25,21 @@ ENV RAILS_ENV="production" \
 # Throw-away build stage to reduce size of final image
 FROM base AS build
 
+# Disable frozen mode for the entire build stage.
+# BUNDLE_DEPLOYMENT="1" is inherited from base, but here we need Bundler to be
+# able to resolve and install gems even when Gemfile.lock is out of date
+# (e.g. after adding rack-cors without a local Ruby install to run bundle install).
+# The final stage re-inherits BUNDLE_DEPLOYMENT="1" from base, so production is unaffected.
+ENV BUNDLE_DEPLOYMENT=""
+
 # Install packages needed to build gems
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y build-essential git libpq-dev libyaml-dev pkg-config && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Install application gems
-# BUNDLE_DEPLOYMENT="" overrides the frozen mode set by the ENV above, allowing
-# Bundler to resolve and install new gems (e.g. rack-cors) without a local lockfile update.
 COPY Gemfile Gemfile.lock ./
-RUN BUNDLE_DEPLOYMENT="" bundle install && \
+RUN bundle install && \
     rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git && \
     bundle exec bootsnap precompile --gemfile
 
