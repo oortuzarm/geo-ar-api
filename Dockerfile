@@ -31,8 +31,10 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Install application gems
+# BUNDLE_DEPLOYMENT="" overrides the frozen mode set by the ENV above, allowing
+# Bundler to resolve and install new gems (e.g. rack-cors) without a local lockfile update.
 COPY Gemfile Gemfile.lock ./
-RUN bundle install && \
+RUN BUNDLE_DEPLOYMENT="" bundle install && \
     rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git && \
     bundle exec bootsnap precompile --gemfile
 
