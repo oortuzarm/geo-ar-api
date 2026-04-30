@@ -1,0 +1,25 @@
+class GeoProject < ApplicationRecord
+  STATUSES = %w[draft active inactive].freeze
+
+  has_many :geo_points, -> { order(:order) }, dependent: :destroy, inverse_of: :geo_project
+
+  validates :title,  presence: true, length: { maximum: 255 }
+  validates :status, inclusion: { in: STATUSES, message: "debe ser draft, active o inactive" }
+
+  scope :publicly_visible, -> { where(status: 'active') }
+
+  def as_api_json
+    {
+      id:          id,
+      title:       title,
+      subtitle:    subtitle,
+      description: description,
+      coverImage:  cover_image,
+      howToGet:    how_to_get,
+      status:      status,
+      createdAt:   created_at.iso8601(3),
+      updatedAt:   updated_at.iso8601(3),
+      geoPointIds: geo_points.pluck(:id),
+    }
+  end
+end
