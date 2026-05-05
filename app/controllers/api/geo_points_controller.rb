@@ -41,6 +41,7 @@ module Api
         :name, :lookiar_url, :latitude, :longitude,
         :activation_radius, :image, :description,
         :instructions, :active, :order,
+        availability: [:schedule_enabled, :quota_enabled],
       )
     end
   end

@@ -20,6 +20,7 @@ class GeoPoint < ApplicationRecord
       instructions:     instructions,
       active:           active,
       order:            order,
+      availability:     availability,
     }
   end
 end
