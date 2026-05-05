@@ -1,7 +1,6 @@
 allowed = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "https://geo-ar-henna.vercel.app",
   "https://geo-ar-chi.vercel.app"
 ].freeze
 
