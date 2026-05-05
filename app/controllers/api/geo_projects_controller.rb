@@ -35,29 +35,62 @@ module Api
     # Saves the project and all its points in a single transaction.
     # Payload: { title, subtitle, ..., geoPoints: [ { id?, name, latitude, ... } ] }
     def sync
-      sp = sync_params
-      incoming_points = sp[:geo_points] || []
-      incoming_ids    = incoming_points.filter_map { |p| p[:id].presence }
+      started_at = Time.current
+      sp  = sync_params
+      pts = (sp[:geo_points] || []).map(&:to_h)
+
+      Rails.logger.info "[SYNC] START project=#{@project.id} points=#{pts.size}"
+
+      now = Time.current
 
       ActiveRecord::Base.transaction do
-        @project.update!(sp.except(:geo_points))
+        # 1. Update project fields — 1 query
+        project_attrs = sp.except(:geo_points).to_h
+        @project.update!(project_attrs) if project_attrs.any?
 
-        # Remove points that are no longer in the payload
-        @project.geo_points.where.not(id: incoming_ids).destroy_all
+        # 2. Delete removed points in batch — 1 query, no callbacks
+        incoming_ids = pts.filter_map { |p| p["id"].presence }
+        @project.geo_points.where.not(id: incoming_ids).delete_all
 
-        incoming_points.each do |pt|
-          attrs = pt.except(:id).to_h
-          if pt[:id].present?
-            point = @project.geo_points.find_by(id: pt[:id])
-            point&.update!(attrs)
-          else
-            @project.geo_points.create!(attrs)
+        # 3. Upsert all incoming points — 1 query (new + existing)
+        unless pts.empty?
+          records = pts.map do |pt|
+            {
+              "id"                => pt["id"].presence || SecureRandom.uuid,
+              "geo_project_id"    => @project.id,
+              "name"              => pt["name"],
+              "lookiar_url"       => pt["lookiar_url"],
+              "latitude"          => pt["latitude"],
+              "longitude"         => pt["longitude"],
+              "activation_radius" => pt["activation_radius"],
+              "image"             => pt["image"],
+              "description"       => pt["description"],
+              "instructions"      => pt["instructions"],
+              "button_text"       => pt["button_text"],
+              "active"            => pt.fetch("active", true),
+              "order"             => pt.fetch("order", 0),
+              "availability"      => pt.fetch("availability", {}),
+              "created_at"        => now,
+              "updated_at"        => now,
+            }
           end
+
+          GeoPoint.upsert_all(
+            records,
+            unique_by: :id,
+            update_only: %w[
+              name lookiar_url latitude longitude activation_radius
+              image description instructions button_text active order
+              availability updated_at
+            ],
+          )
         end
       end
 
-      @project.reload
-      render json: @project.as_api_json_with_points
+      elapsed = ((Time.current - started_at) * 1000).round
+      Rails.logger.info "[SYNC] END #{elapsed}ms"
+
+      render json: { success: true, project_id: @project.id }
     end
 
     private
