@@ -1,10 +1,10 @@
 class CreateGeoPoints < ActiveRecord::Migration[7.2]
   def change
-    create_table :geo_points, id: :uuid, default: 'gen_random_uuid()' do |t|
+    create_table :geo_points, id: :uuid, default: "gen_random_uuid()" do |t|
       t.references :geo_project, null: false, foreign_key: true, type: :uuid
 
-      t.string  :name,               null: false, default: 'Nuevo punto'
-      t.string  :lookiar_url,        null: false, default: ''
+      t.string  :name,               null: false, default: "Nuevo punto"
+      t.string  :lookiar_url,        null: false, default: ""
       t.float   :latitude,           null: false
       t.float   :longitude,          null: false
       t.integer :activation_radius,  null: false, default: 50
