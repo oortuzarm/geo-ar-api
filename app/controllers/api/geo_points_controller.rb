@@ -40,8 +40,12 @@ module Api
       params.permit(
         :name, :lookiar_url, :latitude, :longitude,
         :activation_radius, :image, :description,
-        :instructions, :active, :order,
-        availability: [:schedule_enabled, :quota_enabled],
+        :instructions, :active, :order, :button_text,
+        availability: [
+          :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
+          :schedule_start_time, :schedule_end_time,
+          schedule_days: [],
+        ],
       )
     end
   end

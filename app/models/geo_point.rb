@@ -18,9 +18,19 @@ class GeoPoint < ApplicationRecord
       image:            image,
       description:      description,
       instructions:     instructions,
+      buttonText:       button_text,
       active:           active,
       order:            order,
-      availability:     availability,
+      availability:     camelize_availability(availability),
     }
+  end
+
+  private
+
+  # JSONB availability is stored in snake_case (normalize_params converts keys on ingest).
+  # Convert back to camelCase so the JS frontend receives keys matching its TypeScript type.
+  def camelize_availability(hash)
+    return {} unless hash.is_a?(Hash)
+    hash.transform_keys { |k| k.to_s.camelize(:lower) }
   end
 end
