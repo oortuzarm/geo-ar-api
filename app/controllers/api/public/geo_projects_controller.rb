@@ -21,7 +21,7 @@ module Api
       def create
         project = GeoProject.create!(
           title: "Proyecto Demo",
-          status: "active"
+          status: "active",
         )
 
         render json: project.as_api_json, status: :created

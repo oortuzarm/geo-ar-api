@@ -40,7 +40,7 @@ module Api
       params.permit(
         :name, :lookiar_url, :latitude, :longitude,
         :activation_radius, :image, :description,
-        :instructions, :active, :order
+        :instructions, :active, :order,
       )
     end
   end
