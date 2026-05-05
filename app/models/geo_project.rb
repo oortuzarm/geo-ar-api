@@ -6,7 +6,7 @@ class GeoProject < ApplicationRecord
   validates :title,  presence: true, length: { maximum: 255 }
   validates :status, inclusion: { in: STATUSES, message: "debe ser draft, active o inactive" }
 
-  scope :publicly_visible, -> { where(status: 'active') }
+  scope :publicly_visible, -> { where(status: "active") }
 
   def as_api_json
     {

@@ -8,8 +8,8 @@ module Api
       def show
         project = GeoProject.find(params[:id])
 
-        unless project.status == 'active'
-          render json: { error: 'Este proyecto no está publicado.' }, status: :forbidden
+        unless project.status == "active"
+          render json: { error: "Este proyecto no está publicado." }, status: :forbidden
           return
         end
 
@@ -20,8 +20,8 @@ module Api
       # Temporal: crea un proyecto demo con datos hardcodeados para testing.
       def create
         project = GeoProject.create!(
-          title: 'Proyecto Demo',
-          status: 'active'
+          title: "Proyecto Demo",
+          status: "active"
         )
 
         render json: project.as_api_json, status: :created
