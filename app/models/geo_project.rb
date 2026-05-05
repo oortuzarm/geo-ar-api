@@ -22,4 +22,8 @@ class GeoProject < ApplicationRecord
       geoPointIds: geo_points.pluck(:id),
     }
   end
+
+  def as_api_json_with_points
+    as_api_json.merge(geoPoints: geo_points.map(&:as_api_json))
+  end
 end

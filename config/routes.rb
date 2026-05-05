@@ -5,6 +5,7 @@ Rails.application.routes.draw do
     end
 
     resources :geo_projects do
+      member { patch :sync }
       resources :geo_points, only: %i[index create]
     end
 
