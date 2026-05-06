@@ -18,16 +18,46 @@ module Api
         lat = params[:latitude].to_f
         lng = params[:longitude].to_f
 
+        Rails.logger.info "[ACCESS] ── START ──────────────────────────────────────"
+        Rails.logger.info "[ACCESS] project_id=#{@project.id} point_id=#{@point.id}"
+        Rails.logger.info "[ACCESS] raw params: lat_raw=#{params[:latitude].inspect} lng_raw=#{params[:longitude].inspect}"
+        Rails.logger.info "[ACCESS] user   lat=#{lat} lng=#{lng}"
+        Rails.logger.info "[ACCESS] point  lat=#{@point.latitude} lng=#{@point.longitude}"
+        Rails.logger.info "[ACCESS] radius=#{@point.activation_radius}m"
+        Rails.logger.info "[ACCESS] availability=#{@point.availability.inspect}"
+
         dist = haversine(lat, lng, @point.latitude, @point.longitude)
-        return render_deny("Debes estar dentro del área para acceder") if dist > @point.activation_radius
+        within = dist <= @point.activation_radius
 
-        return render_deny("Esta experiencia está fuera del horario disponible") unless schedule_ok?
+        Rails.logger.info "[ACCESS] distance=#{dist.round(2)}m within_radius=#{within}"
 
-        if quota_active?
-          msg = try_decrement_quota
-          return render_deny(msg) if msg
+        unless within
+          Rails.logger.info "[ACCESS] DENY reason=distance dist=#{dist.round(2)}m > radius=#{@point.activation_radius}m"
+          return render_deny("Debes estar dentro del área para acceder")
         end
 
+        sched_ok = schedule_ok?
+        Rails.logger.info "[ACCESS] schedule_ok=#{sched_ok}"
+
+        unless sched_ok
+          Rails.logger.info "[ACCESS] DENY reason=schedule availability=#{@point.availability.inspect}"
+          return render_deny("Esta experiencia está fuera del horario disponible")
+        end
+
+        if quota_active?
+          av    = @point.availability || {}
+          Rails.logger.info "[ACCESS] quota active limit=#{av["quota_limit"]} used=#{av["quota_used"]}"
+          msg = try_decrement_quota
+          if msg
+            Rails.logger.info "[ACCESS] DENY reason=quota msg=#{msg}"
+            return render_deny(msg)
+          end
+          Rails.logger.info "[ACCESS] quota decremented ok"
+        else
+          Rails.logger.info "[ACCESS] quota not active — skipping"
+        end
+
+        Rails.logger.info "[ACCESS] ALLOW url=#{@point.lookiar_url}"
         render json: { url: @point.lookiar_url }
       end
 
@@ -35,15 +65,22 @@ module Api
 
       def set_project
         @project = GeoProject.find(params[:geo_project_id])
-        render json: { message: "Proyecto no publicado" }, status: :forbidden unless @project.status == "active"
+        unless @project.status == "active"
+          Rails.logger.info "[ACCESS] DENY reason=project_not_published project_id=#{@project.id} status=#{@project.status}"
+          render json: { message: "Proyecto no publicado" }, status: :forbidden
+        end
       end
 
       def set_point
         @point = @project.geo_points.find_by(id: params[:id], active: true)
-        render json: { message: "Punto no encontrado" }, status: :not_found unless @point
+        unless @point
+          Rails.logger.info "[ACCESS] DENY reason=point_not_found point_id=#{params[:id]} project_id=#{@project.id}"
+          render json: { message: "Punto no encontrado" }, status: :not_found
+        end
       end
 
       def render_deny(message)
+        Rails.logger.info "[ACCESS] ── RESPONSE deny message=#{message.inspect}"
         render json: { message: }, status: :unprocessable_entity
       end
 
