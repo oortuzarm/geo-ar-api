@@ -68,9 +68,17 @@ module Api
         t4 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         Rails.logger.info "[SAVE_PERF] delete_ms=#{ms(t3, t4)}"
 
-        # 3. Upsert all incoming points — 1 query (new + existing)
+        # 3. Upsert all incoming points.
+        #
+        # The frontend skips re-sending unchanged base64 images to keep payloads small.
+        # When the `image` key is absent from a point's payload we must NOT overwrite the
+        # stored value with NULL.  We detect this by checking pt.key?("image"):
+        #   - key present (value is a string or nil) → image changed; include in UPDATE
+        #   - key absent                              → image unchanged; exclude from UPDATE
+        #
+        # This requires two separate upsert_all calls with different update_only columns.
         unless pts.empty?
-          records = pts.map do |pt|
+          build_record = lambda do |pt|
             {
               "id"                => pt["id"].presence || SecureRandom.uuid,
               "geo_project_id"    => @project.id,
@@ -91,15 +99,30 @@ module Api
             }
           end
 
-          GeoPoint.upsert_all(
-            records,
-            unique_by: :id,
-            update_only: %w[
-              name lookiar_url latitude longitude activation_radius
-              image description instructions button_text active order
-              availability updated_at
-            ],
-          )
+          base_columns = %w[
+            name lookiar_url latitude longitude activation_radius
+            description instructions button_text active order
+            availability updated_at
+          ]
+
+          pts_with_image    = pts.select { |p| p.key?("image") }
+          pts_without_image = pts.reject { |p| p.key?("image") }
+
+          if pts_with_image.any?
+            GeoPoint.upsert_all(
+              pts_with_image.map(&build_record),
+              unique_by: :id,
+              update_only: base_columns + %w[image],
+            )
+          end
+
+          if pts_without_image.any?
+            GeoPoint.upsert_all(
+              pts_without_image.map(&build_record),
+              unique_by: :id,
+              update_only: base_columns,
+            )
+          end
         end
 
         t5 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
