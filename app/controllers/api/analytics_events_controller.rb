@@ -37,5 +37,39 @@ module Api
         conversion:    conversion,
       }
     end
+
+    # GET /api/geo_projects/:id/analytics_by_point
+    # Single query: LEFT JOIN + conditional COUNT FILTER — no N+1.
+    # Includes points with 0 events so the frontend always gets a complete list.
+    def stats_by_point
+      project = GeoProject.find(params[:id])
+
+      rows = project.geo_points
+        .select(
+          "geo_points.id",
+          "geo_points.name",
+          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'radius_enter') AS radius_entries",
+          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'point_click') AS clicks",
+        )
+        .left_joins(:analytics_events)
+        .group("geo_points.id", "geo_points.name")
+        .order("geo_points.order")
+
+      points = rows.map do |row|
+        re         = row.radius_entries.to_i
+        cl         = row.clicks.to_i
+        conversion = re > 0 ? (cl.to_f / re * 100).round : 0
+
+        {
+          pointId:       row.id,
+          pointName:     row.name,
+          radiusEntries: re,
+          clicks:        cl,
+          conversion:    conversion,
+        }
+      end
+
+      render json: { points: points }
+    end
   end
 end

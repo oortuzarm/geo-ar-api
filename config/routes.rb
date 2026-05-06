@@ -11,7 +11,8 @@ Rails.application.routes.draw do
     resources :geo_projects do
       member do
         patch :sync
-        get :analytics, to: "analytics_events#stats"
+        get :analytics,          to: "analytics_events#stats"
+        get :analytics_by_point, to: "analytics_events#stats_by_point"
       end
       resources :geo_points, only: %i[index create]
     end
