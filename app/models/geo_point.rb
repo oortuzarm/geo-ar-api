@@ -6,6 +6,13 @@ class GeoPoint < ApplicationRecord
   validates :activation_radius, numericality: { greater_than: 0, only_integer: true }
   validates :order,             numericality: { greater_than_or_equal_to: 0, only_integer: true }
 
+  # Public variant: intentionally excludes lookiarUrl so the destination
+  # URL is never exposed in the HTML payload. The URL is returned only
+  # after server-side validation via POST .../geo_points/:id/access.
+  def as_public_api_json
+    as_api_json.except(:lookiarUrl)
+  end
+
   def as_api_json
     {
       id:               id,

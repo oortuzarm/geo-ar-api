@@ -1,7 +1,11 @@
 Rails.application.routes.draw do
   namespace :api do
     namespace :public do
-      resources :geo_projects, only: %i[show create]
+      resources :geo_projects, only: %i[show create] do
+        resources :geo_points, only: %i[index] do
+          member { post :access }
+        end
+      end
     end
 
     resources :geo_projects do
