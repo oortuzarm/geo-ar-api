@@ -17,6 +17,7 @@ class GeoProject < ApplicationRecord
       description: description,
       coverImage:  cover_image,
       howToGet:    how_to_get,
+      shareText:   share_text,
       status:      status,
       createdAt:   created_at.iso8601(3),
       updatedAt:   updated_at.iso8601(3),

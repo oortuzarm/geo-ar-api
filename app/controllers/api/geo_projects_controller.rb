@@ -126,12 +126,12 @@ module Api
     end
 
     def project_params
-      params.permit(:title, :subtitle, :description, :cover_image, :how_to_get, :status)
+      params.permit(:title, :subtitle, :description, :cover_image, :how_to_get, :share_text, :status)
     end
 
     def sync_params
       params.permit(
-        :title, :subtitle, :description, :cover_image, :how_to_get,
+        :title, :subtitle, :description, :cover_image, :how_to_get, :share_text,
         geo_points: [
           :id, :name, :lookiar_url, :latitude, :longitude,
           :activation_radius, :image, :description, :instructions,
