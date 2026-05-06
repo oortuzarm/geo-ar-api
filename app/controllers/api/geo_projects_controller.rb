@@ -35,22 +35,38 @@ module Api
     # Saves the project and all its points in a single transaction.
     # Payload: { title, subtitle, ..., geoPoints: [ { id?, name, latitude, ... } ] }
     def sync
-      started_at = Time.current
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      payload_kb = (request.content_length.to_f / 1024).round(1)
+      Rails.logger.info "[SAVE_PERF] ── START project=#{@project.id} payload_size=#{payload_kb}KB"
+
       sp  = sync_params
       pts = (sp[:geo_points] || []).map(&:to_h)
 
-      Rails.logger.info "[SYNC] START project=#{@project.id} points=#{pts.size}"
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Rails.logger.info "[SAVE_PERF] parse_ms=#{ms(t0, t1)} points_count=#{pts.size}"
+
+      cover_kb  = sp[:cover_image].to_s.bytesize / 1024.0
+      img_sizes = pts.map { |p| p["image"].to_s.bytesize }
+      pts_with_images = img_sizes.count(&:positive?)
+      total_img_kb = img_sizes.sum / 1024.0
+      Rails.logger.info "[SAVE_PERF] cover_image_kb=#{cover_kb.round(1)} pts_with_images=#{pts_with_images}/#{pts.size} total_point_images_kb=#{total_img_kb.round(1)}"
 
       now = Time.current
+      t2  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
       ActiveRecord::Base.transaction do
         # 1. Update project fields — 1 query
         project_attrs = sp.except(:geo_points).to_h
         @project.update!(project_attrs) if project_attrs.any?
+        t3 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        Rails.logger.info "[SAVE_PERF] project_update_ms=#{ms(t2, t3)}"
 
         # 2. Delete removed points in batch — 1 query, no callbacks
         incoming_ids = pts.filter_map { |p| p["id"].presence }
         @project.geo_points.where.not(id: incoming_ids).delete_all
+        t4 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        Rails.logger.info "[SAVE_PERF] delete_ms=#{ms(t3, t4)}"
 
         # 3. Upsert all incoming points — 1 query (new + existing)
         unless pts.empty?
@@ -85,15 +101,25 @@ module Api
             ],
           )
         end
+
+        t5 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        Rails.logger.info "[SAVE_PERF] upsert_ms=#{ms(t4, t5)}"
       end
 
-      elapsed = ((Time.current - started_at) * 1000).round
-      Rails.logger.info "[SYNC] END #{elapsed}ms"
+      t6 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Rails.logger.info "[SAVE_PERF] transaction_ms=#{ms(t2, t6)}"
 
-      render json: { success: true, project_id: @project.id }
+      t7 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Rails.logger.info "[SAVE_PERF] total_ms=#{ms(t0, t7)}"
+
+      render json: { success: true, project_id: @project.id, points_count: pts.size }
     end
 
     private
+
+    def ms(t_start, t_end)
+      ((t_end - t_start) * 1000).round
+    end
 
     def set_project
       @project = GeoProject.find(params[:id])
