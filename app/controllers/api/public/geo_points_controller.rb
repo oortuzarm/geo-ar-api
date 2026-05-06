@@ -57,8 +57,16 @@ module Api
           Rails.logger.info "[ACCESS] quota not active — skipping"
         end
 
-        Rails.logger.info "[ACCESS] ALLOW url=#{@point.lookiar_url}"
-        render json: { url: @point.lookiar_url }
+        target_url = @point.lookiar_url.presence
+        Rails.logger.info "[ACCESS] target_url=#{target_url.inspect}"
+
+        unless target_url
+          Rails.logger.info "[ACCESS] DENY reason=empty_url point_id=#{@point.id}"
+          return render json: { success: false, message: "No se encontró una URL válida para esta experiencia" }, status: :unprocessable_entity
+        end
+
+        Rails.logger.info "[ACCESS] success response url=#{target_url}"
+        render json: { success: true, url: target_url }
       end
 
       private
@@ -81,7 +89,7 @@ module Api
 
       def render_deny(message)
         Rails.logger.info "[ACCESS] ── RESPONSE deny message=#{message.inspect}"
-        render json: { message: }, status: :unprocessable_entity
+        render json: { success: false, message: }, status: :unprocessable_entity
       end
 
       # ── Haversine ──────────────────────────────────────────────────────────────
