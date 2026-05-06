@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"d:\\\\Lookiar PC\\\\Herramientas\\\\geo-AR\\\\src\\\\pages\\\\Public\")",
+      "Read(//d/Lookiar PC/Herramientas/geo-AR/src/pages/Public/**)",
+      "Read(//d/Lookiar PC/Herramientas/geo-AR/**)"
+    ]
+  }
+}
