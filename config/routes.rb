@@ -9,9 +9,14 @@ Rails.application.routes.draw do
     end
 
     resources :geo_projects do
-      member { patch :sync }
+      member do
+        patch :sync
+        get :analytics, to: "analytics_events#stats"
+      end
       resources :geo_points, only: %i[index create]
     end
+
+    resources :analytics_events, only: %i[create]
 
     # Standalone update/delete for geo_points
     # (frontend calls PUT /api/geo_points/:id and DELETE /api/geo_points/:id)

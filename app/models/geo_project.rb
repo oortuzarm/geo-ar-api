@@ -1,7 +1,8 @@
 class GeoProject < ApplicationRecord
   STATUSES = %w[draft active inactive].freeze
 
-  has_many :geo_points, -> { order(:order) }, dependent: :destroy, inverse_of: :geo_project
+  has_many :geo_points,        -> { order(:order) }, dependent: :destroy, inverse_of: :geo_project
+  has_many :analytics_events,  dependent: :destroy
 
   validates :title,  presence: true, length: { maximum: 255 }
   validates :status, inclusion: { in: STATUSES, message: "debe ser draft, active o inactive" }

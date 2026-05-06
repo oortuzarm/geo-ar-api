@@ -10,10 +10,22 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_05_05_000002) do
+ActiveRecord::Schema[7.2].define(version: 2026_05_06_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
+
+  create_table "analytics_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "geo_project_id", null: false
+    t.uuid "geo_point_id", null: false
+    t.string "event_type", null: false
+    t.string "session_id", null: false
+    t.date "event_date", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geo_project_id", "geo_point_id", "event_type", "session_id", "event_date"], name: "idx_analytics_events_uniqueness", unique: true
+    t.index ["geo_project_id"], name: "index_analytics_events_on_geo_project_id"
+  end
 
   create_table "geo_points", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "geo_project_id", null: false
@@ -47,5 +59,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_05_000002) do
     t.index ["status"], name: "index_geo_projects_on_status"
   end
 
+  add_foreign_key "analytics_events", "geo_points"
+  add_foreign_key "analytics_events", "geo_projects"
   add_foreign_key "geo_points", "geo_projects"
 end
