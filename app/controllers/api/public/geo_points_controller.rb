@@ -106,24 +106,63 @@ module Api
 
       # ── Schedule ───────────────────────────────────────────────────────────────
 
+      # Schedule validation uses the client's local time when provided.
+      #
+      # The frontend sends localTime (HH:MM) and localDay (e.g. "Lun") in the
+      # request body so that schedule checks use the browser's local clock —
+      # identical to what computePointAvailability() uses in availability.ts.
+      # Without this, a Rails server running in UTC would silently diverge from
+      # a user whose device is in a different timezone (e.g. UTC-3 Argentina).
+      #
+      # Fallback: if the client doesn't send localTime/localDay (older app
+      # versions), the server falls back to Time.current. In that case,
+      # schedule validation may be inaccurate for users outside the server's
+      # configured timezone — this is documented here rather than silently wrong.
       def schedule_ok?
         av = @point.availability || {}
         return true unless av["schedule_enabled"]
 
-        week_days = %w[Dom Lun Mar Mié Jue Vie Sáb]
-        today     = week_days[Time.current.wday]
-        days      = av["schedule_days"] || []
+        days = av["schedule_days"] || []
+
+        # Prefer the client's local day; fall back to server day.
+        today = if valid_local_day?(params[:local_day])
+          params[:local_day]
+        else
+          week_days = %w[Dom Lun Mar Mié Jue Vie Sáb]
+          week_days[Time.current.wday]
+        end
 
         return false if days.any? && !days.include?(today)
 
         st = av["schedule_start_time"]
         et = av["schedule_end_time"]
         if st && et
-          cur = Time.current.strftime("%H:%M")
-          return false if cur < st || cur > et
+          # Prefer the client's local time; fall back to server time.
+          cur = if valid_local_time?(params[:local_time])
+            params[:local_time]
+          else
+            Time.current.strftime("%H:%M")
+          end
+
+          Rails.logger.info "[ACCESS] schedule cur=#{cur} st=#{st} et=#{et} source=#{params[:local_time].present? ? "client" : "server"}"
+
+          # Open window is [start, end) — exclusive end time.
+          # At exactly et the experience is considered closed.
+          return false if cur < st || cur >= et
         end
 
         true
+      end
+
+      # HH:MM format guard — prevents unvalidated client strings from being
+      # used in comparisons. Does not verify the time is logically valid
+      # (e.g. 25:99 would pass), but that's irrelevant for a string comparison.
+      def valid_local_time?(value)
+        value.is_a?(String) && value.match?(/\A\d{2}:\d{2}\z/)
+      end
+
+      def valid_local_day?(value)
+        %w[Dom Lun Mar Mié Jue Vie Sáb].include?(value)
       end
 
       # ── Quota ──────────────────────────────────────────────────────────────────
