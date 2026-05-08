@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_05_06_000002) do
+ActiveRecord::Schema[7.2].define(version: 2026_05_08_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -23,6 +23,11 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_06_000002) do
     t.date "event_date", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.float "latitude"
+    t.float "longitude"
+    t.string "country"
+    t.string "city"
+    t.string "commune"
     t.index ["geo_project_id", "geo_point_id", "event_type", "session_id", "event_date"], name: "idx_analytics_events_uniqueness", unique: true
     t.index ["geo_project_id"], name: "index_analytics_events_on_geo_project_id"
   end
@@ -39,10 +44,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_06_000002) do
     t.text "instructions"
     t.boolean "active", default: true, null: false
     t.integer "order", default: 0, null: false
-    t.jsonb "availability", default: {}, null: false
-    t.string "button_text"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "availability", default: {}, null: false
+    t.string "button_text"
     t.index ["geo_project_id", "order"], name: "index_geo_points_on_geo_project_id_and_order"
     t.index ["geo_project_id"], name: "index_geo_points_on_geo_project_id"
   end
@@ -53,14 +58,12 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_06_000002) do
     t.text "description"
     t.text "cover_image"
     t.text "how_to_get"
-    t.text "share_text"
     t.string "status", default: "draft", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.text "share_text"
     t.index ["status"], name: "index_geo_projects_on_status"
   end
 
-  add_foreign_key "analytics_events", "geo_points"
-  add_foreign_key "analytics_events", "geo_projects"
   add_foreign_key "geo_points", "geo_projects"
 end

@@ -13,6 +13,9 @@ Rails.application.routes.draw do
         patch :sync
         get :analytics,          to: "analytics_events#stats"
         get :analytics_by_point, to: "analytics_events#stats_by_point"
+        get :analytics_by_hour,  to: "analytics_events#by_hour"
+        get :analytics_by_day,   to: "analytics_events#by_day"
+        get :analytics_geo,      to: "analytics_events#geo_distribution"
       end
       resources :geo_points, only: %i[index create]
     end
