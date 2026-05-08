@@ -81,32 +81,35 @@ module Api
 
     # GET /api/geo_projects/:id/analytics_by_hour
     # Returns event count grouped by hour of day (0..23, UTC).
+    # Uses .group().count → Hash, same pattern as geo_buckets (avoids AR instance conflicts).
     # Format: { data: [{ hour: 0, count: 12 }, ...] }
     def by_hour
       project = GeoProject.find(params[:id])
 
-      rows = project.analytics_events
-        .select("EXTRACT(HOUR FROM created_at)::int AS hour, COUNT(*)::int AS count")
-        .group("EXTRACT(HOUR FROM created_at)::int")
-        .order("EXTRACT(HOUR FROM created_at)::int")
+      counts = project.analytics_events
+        .group(Arel.sql("EXTRACT(HOUR FROM created_at)::int"))
+        .count
 
-      data = rows.map { |r| { hour: r.hour, count: r.count } }
+      data = counts.map { |hour, count| { hour: hour.to_i, count: count } }
+                   .sort_by { |h| h[:hour] }
 
       render json: { data: data }
     end
 
     # GET /api/geo_projects/:id/analytics_by_day
     # Returns event count grouped by day of week (0=Sunday..6=Saturday, matches JS getDay()).
+    # PostgreSQL EXTRACT(DOW) = 0 (Sun) … 6 (Sat), aligns with JS getDay().
+    # Uses .group().count → Hash, same pattern as geo_buckets (avoids AR instance conflicts).
     # Format: { data: [{ day: 0, count: 20 }, ...] }
     def by_day
       project = GeoProject.find(params[:id])
 
-      rows = project.analytics_events
-        .select("EXTRACT(DOW FROM created_at)::int AS day, COUNT(*)::int AS count")
-        .group("EXTRACT(DOW FROM created_at)::int")
-        .order("EXTRACT(DOW FROM created_at)::int")
+      counts = project.analytics_events
+        .group(Arel.sql("EXTRACT(DOW FROM created_at)::int"))
+        .count
 
-      data = rows.map { |r| { day: r.day, count: r.count } }
+      data = counts.map { |day, count| { day: day.to_i, count: count } }
+                   .sort_by { |h| h[:day] }
 
       render json: { data: data }
     end
