@@ -149,12 +149,16 @@ module Api
     end
 
     def project_params
-      params.permit(:title, :subtitle, :description, :cover_image, :how_to_get, :share_text, :status)
+      params.permit(
+        :title, :subtitle, :description, :cover_image, :how_to_get, :share_text, :status,
+        :public_initial_view_mode, :public_initial_center_lat, :public_initial_center_lng, :public_initial_zoom,
+      )
     end
 
     def sync_params
       params.permit(
         :title, :subtitle, :description, :cover_image, :how_to_get, :share_text,
+        :public_initial_view_mode, :public_initial_center_lat, :public_initial_center_lng, :public_initial_zoom,
         geo_points: [
           :id, :name, :lookiar_url, :latitude, :longitude,
           :activation_radius, :image, :description, :instructions,

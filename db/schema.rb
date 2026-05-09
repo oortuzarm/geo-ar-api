@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_05_08_000001) do
+ActiveRecord::Schema[7.2].define(version: 2026_05_09_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -62,6 +62,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_08_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.text "share_text"
+    t.string "public_initial_view_mode", default: "fit_points"
+    t.decimal "public_initial_center_lat", precision: 10, scale: 6
+    t.decimal "public_initial_center_lng", precision: 10, scale: 6
+    t.integer "public_initial_zoom"
     t.index ["status"], name: "index_geo_projects_on_status"
   end
 
