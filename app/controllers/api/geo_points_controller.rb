@@ -44,7 +44,7 @@ module Api
         availability: [
           :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
           :schedule_start_time, :schedule_end_time,
-          schedule_days: [],
+          schedule_days: []
         ],
       )
     end

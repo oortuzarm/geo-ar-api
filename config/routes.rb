@@ -27,5 +27,5 @@ Rails.application.routes.draw do
     resources :geo_points, only: %i[update destroy]
   end
 
-  get "/health", to: proc { [200, { }, ["OK"]] }
+  get "/health", to: proc { [ 200, {}, [ "OK" ] ] }
 end

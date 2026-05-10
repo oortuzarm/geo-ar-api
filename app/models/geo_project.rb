@@ -29,7 +29,7 @@ class GeoProject < ApplicationRecord
       publicInitialViewMode:   public_initial_view_mode,
       publicInitialCenterLat:  public_initial_center_lat&.to_f,
       publicInitialCenterLng:  public_initial_center_lng&.to_f,
-      publicInitialZoom:       public_initial_zoom,
+      publicInitialZoom:       public_initial_zoom
     }
   end
 

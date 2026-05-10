@@ -37,7 +37,7 @@ class NominatimGeocoder
     {
       country: address["country"].presence,
       city:    (address["city"] || address["town"] || address["village"] || address["county"]).presence,
-      commune: (address["suburb"] || address["neighbourhood"] || address["quarter"] || address["municipality"]).presence,
+      commune: (address["suburb"] || address["neighbourhood"] || address["quarter"] || address["municipality"]).presence
     }
   rescue => e
     Rails.logger.warn "[NominatimGeocoder] #{e.class}: #{e.message}"

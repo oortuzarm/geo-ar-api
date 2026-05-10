@@ -12,7 +12,7 @@ module Api
         geo_point_id:   params[:point_id],
         event_type:     params[:event_type],
         session_id:     params[:session_id],
-        event_date:     Date.current,
+        event_date:     Date.current
       }
 
       event = AnalyticsEvent.find_or_initialize_by(attrs)
@@ -41,7 +41,7 @@ module Api
       render json: {
         radiusEntries: radius_entries,
         clicks:        clicks,
-        conversion:    conversion,
+        conversion:    conversion
       }
     end
 
@@ -72,7 +72,7 @@ module Api
           pointName:     row.name,
           radiusEntries: re,
           clicks:        cl,
-          conversion:    conversion,
+          conversion:    conversion
         }
       end
 
@@ -124,7 +124,7 @@ module Api
       render json: {
         countries: geo_buckets(base, :country),
         cities:    geo_buckets(base, :city),
-        communes:  geo_buckets(base, :commune),
+        communes:  geo_buckets(base, :commune)
       }
     end
 

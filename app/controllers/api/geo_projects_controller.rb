@@ -10,7 +10,9 @@ module Api
 
     # GET /api/geo_projects/:id
     def show
-      render json: @project.as_api_json
+      json = @project.as_api_json
+      Rails.logger.info "[GeoProject#show] id=#{@project.id} publicInitialViewMode=#{json[:publicInitialViewMode].inspect} publicInitialZoom=#{json[:publicInitialZoom].inspect}"
+      render json: json
     end
 
     # POST /api/geo_projects
@@ -95,7 +97,7 @@ module Api
               "order"             => pt.fetch("order", 0),
               "availability"      => pt.fetch("availability", {}),
               "created_at"        => now,
-              "updated_at"        => now,
+              "updated_at"        => now
             }
           end
 
@@ -166,8 +168,8 @@ module Api
           availability: [
             :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
             :schedule_start_time, :schedule_end_time,
-            schedule_days: [],
-          ],
+            schedule_days: []
+          ]
         ],
       )
     end

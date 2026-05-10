@@ -9,6 +9,6 @@ class AnalyticsEvent < ApplicationRecord
   validates :event_date, presence: true
   validates :session_id, uniqueness: {
     scope: %i[geo_project_id geo_point_id event_type event_date],
-    message: "evento ya registrado para esta sesión",
+    message: "evento ya registrado para esta sesión"
   }
 end
