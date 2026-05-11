@@ -1,11 +1,13 @@
 module Api
   class GeoProjectsController < ApplicationController
-    before_action :set_project, only: %i[show update destroy sync]
+    before_action :authenticate_user!
+    before_action :set_project,               only: %i[show update destroy sync]
+    before_action :authorize_project_access!, only: %i[show update destroy sync]
 
     # GET /api/geo_projects
     def index
-      projects = GeoProject.all.order(updated_at: :desc)
-      render json: projects.map(&:as_api_json)
+      scope = current_user.role == "admin" ? GeoProject.all : current_user.geo_projects
+      render json: scope.order(updated_at: :desc).map(&:as_api_json)
     end
 
     # GET /api/geo_projects/:id
@@ -17,7 +19,7 @@ module Api
 
     # POST /api/geo_projects
     def create
-      project = GeoProject.create!(project_params)
+      project = current_user.geo_projects.create!(project_params)
       render json: project.as_api_json, status: :created
     end
 
@@ -148,6 +150,10 @@ module Api
 
     def set_project
       @project = GeoProject.find(params[:id])
+    end
+
+    def authorize_project_access!
+      authorize_project!(@project)
     end
 
     def project_params

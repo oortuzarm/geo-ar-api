@@ -1,5 +1,10 @@
 Rails.application.routes.draw do
   namespace :api do
+    post   "auth/register", to: "auth#register"
+    post   "auth/login",    to: "auth#login"
+    get    "auth/me",       to: "auth#me"
+    delete "auth/logout",   to: "auth#logout"
+
     namespace :public do
       resources :geo_projects, only: %i[show create] do
         resources :geo_points, only: %i[index] do

@@ -15,6 +15,25 @@ class ApplicationController < ActionController::API
 
   private
 
+  def current_user
+    return nil unless session[:user_id]
+    @current_user ||= User.find_by(id: session[:user_id])
+  end
+
+  def authenticate_user!
+    unless current_user
+      render json: { error: "No autenticado" }, status: :unauthorized
+      throw :abort
+    end
+  end
+
+  def authorize_project!(project)
+    unless project.user_id == current_user.id || current_user.role == "admin"
+      render json: { error: "No autorizado" }, status: :forbidden
+      throw :abort
+    end
+  end
+
   # Convert camelCase keys sent by the JS frontend to snake_case for Rails strong params.
   # e.g. coverImage → cover_image, geoProjectId → geo_project_id
   def normalize_params

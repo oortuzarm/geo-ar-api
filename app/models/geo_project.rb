@@ -1,6 +1,8 @@
 class GeoProject < ApplicationRecord
   STATUSES = %w[draft active inactive].freeze
 
+  belongs_to :user, optional: true
+
   has_many :geo_points,        -> { order(:order) }, dependent: :destroy, inverse_of: :geo_project
   has_many :analytics_events,  dependent: :destroy
 

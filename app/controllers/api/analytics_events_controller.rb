@@ -1,5 +1,10 @@
 module Api
   class AnalyticsEventsController < ApplicationController
+    ANALYTICS_ACTIONS = %i[stats stats_by_point by_hour by_day geo_distribution].freeze
+
+    before_action :authenticate_user!,         only: ANALYTICS_ACTIONS
+    before_action :set_and_authorize_project!, only: ANALYTICS_ACTIONS
+
     # POST /api/analytics_events
     # Body (camelCase — normalize_params converts to snake_case):
     #   { projectId, pointId, eventType, sessionId, latitude?, longitude? }
@@ -33,9 +38,8 @@ module Api
 
     # GET /api/geo_projects/:id/analytics
     def stats
-      project        = GeoProject.find(params[:id])
-      radius_entries = project.analytics_events.where(event_type: "radius_enter").count
-      clicks         = project.analytics_events.where(event_type: "point_click").count
+      radius_entries = @project.analytics_events.where(event_type: "radius_enter").count
+      clicks         = @project.analytics_events.where(event_type: "point_click").count
       conversion     = radius_entries > 0 ? (clicks.to_f / radius_entries * 100).round : 0
 
       render json: {
@@ -49,9 +53,7 @@ module Api
     # Single query: LEFT JOIN + conditional COUNT FILTER — no N+1.
     # Includes points with 0 events so the frontend always gets a complete list.
     def stats_by_point
-      project = GeoProject.find(params[:id])
-
-      rows = project.geo_points
+      rows = @project.geo_points
         .select(
           "geo_points.id",
           "geo_points.name",
@@ -84,9 +86,7 @@ module Api
     # Uses .group().count → Hash, same pattern as geo_buckets (avoids AR instance conflicts).
     # Format: { data: [{ hour: 0, count: 12 }, ...] }
     def by_hour
-      project = GeoProject.find(params[:id])
-
-      counts = project.analytics_events
+      counts = @project.analytics_events
         .group(Arel.sql("EXTRACT(HOUR FROM created_at)::int"))
         .count
 
@@ -102,9 +102,7 @@ module Api
     # Uses .group().count → Hash, same pattern as geo_buckets (avoids AR instance conflicts).
     # Format: { data: [{ day: 0, count: 20 }, ...] }
     def by_day
-      project = GeoProject.find(params[:id])
-
-      counts = project.analytics_events
+      counts = @project.analytics_events
         .group(Arel.sql("EXTRACT(DOW FROM created_at)::int"))
         .count
 
@@ -118,8 +116,7 @@ module Api
     # Returns aggregated geographic distribution (no individual lat/lng exposed).
     # Format: { countries: [{label, count, pct}], cities: [...], communes: [...] }
     def geo_distribution
-      project = GeoProject.find(params[:id])
-      base    = project.analytics_events
+      base = @project.analytics_events
 
       render json: {
         countries: geo_buckets(base, :country),
@@ -129,6 +126,11 @@ module Api
     end
 
     private
+
+    def set_and_authorize_project!
+      @project = GeoProject.find(params[:id])
+      authorize_project!(@project)
+    end
 
     # Aggregates a text column into [{label, count, pct}], sorted by count desc.
     # Excludes NULL and blank values.

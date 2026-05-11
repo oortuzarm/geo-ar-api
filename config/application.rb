@@ -40,5 +40,14 @@ module GeoArApi
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    # Re-add cookies and session middleware (stripped by api_only).
+    # same_site: :lax works for same-registered-domain subdomains (studio. / api.ubyca.com).
+    config.middleware.use ActionDispatch::Cookies
+    config.middleware.use ActionDispatch::Session::CookieStore,
+      key:       "_ubyca_session",
+      same_site: :lax,
+      secure:    Rails.env.production?,
+      httponly:  true
   end
 end
