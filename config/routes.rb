@@ -25,6 +25,12 @@ Rails.application.routes.draw do
       resources :geo_points, only: %i[index create]
     end
 
+    namespace :admin do
+      get :users,    to: "users#index"
+      get :projects, to: "projects#index"
+      get :metrics,  to: "metrics#index"
+    end
+
     resources :analytics_events, only: %i[create]
 
     # Standalone update/delete for geo_points
