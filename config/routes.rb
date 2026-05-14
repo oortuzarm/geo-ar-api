@@ -38,6 +38,18 @@ Rails.application.routes.draw do
     # Standalone update/delete for geo_points
     # (frontend calls PUT /api/geo_points/:id and DELETE /api/geo_points/:id)
     resources :geo_points, only: %i[update destroy]
+
+    resources :members, only: %i[index update destroy]
+
+    resources :invitations, only: %i[create destroy] do
+      member do
+        post :resend
+      end
+      collection do
+        get  "accept/:token", action: :show_accept, as: :accept_preview
+        post :accept
+      end
+    end
   end
 
   get "/health", to: proc { [ 200, {}, [ "OK" ] ] }

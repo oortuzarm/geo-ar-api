@@ -4,13 +4,18 @@ module Api
 
     # POST /api/auth/register
     def register
-      user = User.create!(
-        email:                 params[:email],
-        password:              params[:password],
-        password_confirmation: params[:password_confirmation],
-        role:                  "user",
-        status:                "active"
-      )
+      user = nil
+      ActiveRecord::Base.transaction do
+        user = User.create!(
+          email:                 params[:email],
+          password:              params[:password],
+          password_confirmation: params[:password_confirmation],
+          role:                  "user",
+          status:                "active"
+        )
+        org = Organization.create!(name: "Mi organización")
+        user.memberships.create!(organization: org, role: "owner")
+      end
       session[:user_id] = user.id
       render json: user_json(user), status: :created
     end

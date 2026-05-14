@@ -27,6 +27,22 @@ class ApplicationController < ActionController::API
     end
   end
 
+  def current_membership
+    return nil unless current_user
+    @current_membership ||= current_user.memberships.includes(:organization).first
+  end
+
+  def current_organization
+    current_membership&.organization
+  end
+
+  def require_owner!
+    unless current_membership&.role == "owner"
+      render json: { error: "Solo el owner puede realizar esta acción." }, status: :forbidden
+      throw :abort
+    end
+  end
+
   def authorize_project!(project)
     unless project.user_id == current_user.id || current_user.role == "admin"
       render json: { error: "No autorizado" }, status: :forbidden
