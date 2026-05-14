@@ -44,6 +44,48 @@ module Api
       head :no_content
     end
 
+    # POST /api/auth/forgot_password
+    def forgot_password
+      user = User.find_by(email: params[:email].to_s.downcase.strip)
+
+      if user&.status == "active"
+        token = PasswordResetToken.generate_for(user)
+        PasswordResetMailer.send_reset_email(user: user, token: token)
+      end
+
+      render json: {
+        message: "Si el correo existe en nuestra plataforma, te enviaremos instrucciones para recuperar tu contraseña."
+      }
+    end
+
+    # POST /api/auth/reset_password
+    def reset_password
+      token_record = PasswordResetToken.find_valid(params[:token].to_s)
+
+      if token_record.nil?
+        render json: { error: "El link de recuperación es inválido o ya expiró." }, status: :unprocessable_entity
+        return
+      end
+
+      password      = params[:password].to_s
+      confirmation  = params[:password_confirmation].to_s
+
+      if password.length < 8
+        render json: { error: "La contraseña debe tener al menos 8 caracteres." }, status: :unprocessable_entity
+        return
+      end
+
+      if password != confirmation
+        render json: { error: "Las contraseñas no coinciden." }, status: :unprocessable_entity
+        return
+      end
+
+      token_record.user.update!(password: password, password_confirmation: confirmation)
+      token_record.use!
+
+      render json: { message: "Contraseña actualizada correctamente. Ya podés iniciar sesión." }
+    end
+
     private
 
     def user_json(user)

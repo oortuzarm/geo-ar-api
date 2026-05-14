@@ -1,6 +1,7 @@
 class User < ApplicationRecord
   has_secure_password
-  has_many :geo_projects, dependent: :nullify
+  has_many :geo_projects,          dependent: :nullify
+  has_many :password_reset_tokens, dependent: :destroy
 
   ROLES    = %w[user admin].freeze
   STATUSES = %w[active suspended].freeze
