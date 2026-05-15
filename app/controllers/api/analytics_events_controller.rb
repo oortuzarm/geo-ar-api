@@ -59,9 +59,17 @@ module Api
 
     # GET /api/geo_projects/:id/analytics
     def stats
-      radius_entries = @project.analytics_events.where(event_type: "radius_enter").count
-      clicks         = @project.analytics_events.where(event_type: "point_click").count
-      conversion     = radius_entries > 0 ? (clicks.to_f / radius_entries * 100).round : 0
+      scope = @project.analytics_events
+
+      radius_entries  = scope.where(event_type: "radius_enter").count
+      clicks          = scope.where(event_type: "point_click").count
+
+      # Conversion = unique sessions that clicked ÷ unique sessions that entered.
+      # Uses distinct session_id so the rate is always 0–100% and represents
+      # "people converted", not raw click intensity.
+      unique_enterers = scope.where(event_type: "radius_enter").distinct.count(:session_id)
+      unique_clickers = scope.where(event_type: "point_click").distinct.count(:session_id)
+      conversion      = unique_enterers > 0 ? (unique_clickers.to_f / unique_enterers * 100).round : 0
 
       render json: {
         radiusEntries: radius_entries,
@@ -73,6 +81,7 @@ module Api
     # GET /api/geo_projects/:id/analytics_by_point
     # Single query: LEFT JOIN + conditional COUNT FILTER — no N+1.
     # Includes points with 0 events so the frontend always gets a complete list.
+    # Conversion uses distinct session counts so it is always 0–100%.
     def stats_by_point
       rows = @project.geo_points
         .select(
@@ -80,15 +89,19 @@ module Api
           "geo_points.name",
           "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'radius_enter') AS radius_entries",
           "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'point_click') AS clicks",
+          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'radius_enter') AS unique_enterers",
+          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'point_click') AS unique_clickers",
         )
         .left_joins(:analytics_events)
         .group("geo_points.id", "geo_points.name")
         .order("geo_points.order")
 
       points = rows.map do |row|
-        re         = row.radius_entries.to_i
-        cl         = row.clicks.to_i
-        conversion = re > 0 ? (cl.to_f / re * 100).round : 0
+        re            = row.radius_entries.to_i
+        cl            = row.clicks.to_i
+        u_enterers    = row.unique_enterers.to_i
+        u_clickers    = row.unique_clickers.to_i
+        conversion    = u_enterers > 0 ? (u_clickers.to_f / u_enterers * 100).round : 0
 
         {
           pointId:       row.id,
