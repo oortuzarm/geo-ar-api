@@ -57,16 +57,42 @@ module Api
           Rails.logger.info "[ACCESS] quota not active — skipping"
         end
 
-        target_url = @point.lookiar_url.presence
-        Rails.logger.info "[ACCESS] target_url=#{target_url.inspect}"
+        ct = @point.content_type.presence || "url"
+        cd = @point.content_data.presence || {}
 
-        unless target_url
-          Rails.logger.info "[ACCESS] DENY reason=empty_url point_id=#{@point.id}"
-          return render json: { success: false, message: "No se encontró una URL válida para esta experiencia" }, status: :unprocessable_entity
+        Rails.logger.info "[ACCESS] content_type=#{ct} content_data_keys=#{cd.keys.inspect}"
+
+        case ct
+        when "url"
+          target_url = cd["url"].presence || @point.lookiar_url.presence
+          Rails.logger.info "[ACCESS] target_url=#{target_url.inspect}"
+          unless target_url
+            Rails.logger.info "[ACCESS] DENY reason=empty_url point_id=#{@point.id}"
+            return render json: { success: false, message: "No se encontró una URL válida para esta experiencia" }, status: :unprocessable_entity
+          end
+          Rails.logger.info "[ACCESS] success url=#{target_url}"
+          render json: { success: true, content_type: "url", url: target_url }
+
+        when "video", "audio", "file"
+          file_url = cd["file_url"].presence
+          Rails.logger.info "[ACCESS] file_url=#{file_url.inspect}"
+          unless file_url
+            Rails.logger.info "[ACCESS] DENY reason=empty_file_url point_id=#{@point.id}"
+            return render json: { success: false, message: "No se encontró un archivo para esta experiencia" }, status: :unprocessable_entity
+          end
+          Rails.logger.info "[ACCESS] success file=#{cd["file_name"].inspect}"
+          render json: {
+            success:      true,
+            content_type: ct,
+            file_url:     file_url,
+            file_name:    cd["file_name"],
+            mime_type:    cd["mime_type"],
+          }
+
+        else
+          Rails.logger.info "[ACCESS] DENY reason=invalid_content_type ct=#{ct}"
+          render_deny("Tipo de contenido no válido")
         end
-
-        Rails.logger.info "[ACCESS] success response url=#{target_url}"
-        render json: { success: true, url: target_url }
       end
 
       private

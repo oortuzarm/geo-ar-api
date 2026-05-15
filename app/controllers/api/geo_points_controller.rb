@@ -49,9 +49,10 @@ module Api
 
     def point_params
       params.permit(
-        :name, :lookiar_url, :latitude, :longitude,
+        :name, :lookiar_url, :content_type, :latitude, :longitude,
         :activation_radius, :image, :description,
         :instructions, :active, :order, :button_text,
+        content_data: {},
         availability: [
           :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
           :schedule_start_time, :schedule_end_time,
