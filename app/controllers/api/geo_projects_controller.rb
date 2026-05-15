@@ -50,6 +50,11 @@ module Api
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       Rails.logger.info "[SAVE_PERF] parse_ms=#{ms(t0, t1)} points_count=#{pts.size}"
 
+      # Temporary: log content fields to verify payload shape
+      pts.each do |pt|
+        Rails.logger.info "[SYNC_DEBUG] point id=#{pt['id'].inspect} content_type=#{pt['content_type'].inspect} content_data_keys=#{pt.fetch('content_data', {}).keys.inspect} lookiar_url=#{pt['lookiar_url'].inspect}"
+      end
+
       cover_kb  = sp[:cover_image].to_s.bytesize / 1024.0
       img_sizes = pts.map { |p| p["image"].to_s.bytesize }
       pts_with_images = img_sizes.count(&:positive?)
@@ -87,7 +92,9 @@ module Api
               "id"                => pt["id"].presence || SecureRandom.uuid,
               "geo_project_id"    => @project.id,
               "name"              => pt["name"],
-              "lookiar_url"       => pt["lookiar_url"],
+              "lookiar_url"       => pt["lookiar_url"].to_s,
+              "content_type"      => pt.fetch("content_type", "url").presence || "url",
+              "content_data"      => pt.fetch("content_data", {}) || {},
               "latitude"          => pt["latitude"],
               "longitude"         => pt["longitude"],
               "activation_radius" => pt["activation_radius"],
@@ -104,7 +111,8 @@ module Api
           end
 
           base_columns = %w[
-            name lookiar_url latitude longitude activation_radius
+            name lookiar_url content_type content_data
+            latitude longitude activation_radius
             description instructions button_text active order
             availability updated_at
           ]
@@ -168,9 +176,10 @@ module Api
         :title, :subtitle, :description, :cover_image, :how_to_get, :share_text,
         :public_initial_view_mode, :public_initial_center_lat, :public_initial_center_lng, :public_initial_zoom,
         geo_points: [
-          :id, :name, :lookiar_url, :latitude, :longitude,
+          :id, :name, :lookiar_url, :content_type, :latitude, :longitude,
           :activation_radius, :image, :description, :instructions,
           :active, :order, :button_text,
+          content_data: {},
           availability: [
             :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
             :schedule_start_time, :schedule_end_time,
