@@ -33,6 +33,9 @@ Rails.application.routes.draw do
       get :metrics,  to: "metrics#index"
     end
 
+    get   "account", to: "account#show"
+    patch "account", to: "account#update"
+
     resources :analytics_events, only: %i[create]
 
     # Standalone update/delete for geo_points
