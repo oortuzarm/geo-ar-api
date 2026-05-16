@@ -33,8 +33,9 @@ Rails.application.routes.draw do
       get :metrics,  to: "metrics#index"
     end
 
-    get   "account", to: "account#show"
-    patch "account", to: "account#update"
+    get   "account",          to: "account#show"
+    patch "account",          to: "account#update"
+    patch "account/password", to: "account#update_password"
 
     resources :analytics_events, only: %i[create]
 

@@ -14,6 +14,27 @@ module Api
       render json: account_json(current_user)
     end
 
+    # PATCH /api/account/password
+    def update_password
+      unless current_user.authenticate(params[:current_password])
+        render json: { error: "La contraseña actual no es correcta." }, status: :unauthorized
+        return
+      end
+
+      if params[:password].blank? || params[:password].length < 8
+        render json: { error: "La nueva contraseña debe tener al menos 8 caracteres." }, status: :unprocessable_entity
+        return
+      end
+
+      if params[:password] != params[:password_confirmation]
+        render json: { error: "Las contraseñas no coinciden." }, status: :unprocessable_entity
+        return
+      end
+
+      current_user.update!(password: params[:password], password_confirmation: params[:password_confirmation])
+      render json: { message: "Contraseña actualizada correctamente." }
+    end
+
     private
 
     def profile_params
