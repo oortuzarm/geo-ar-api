@@ -28,15 +28,12 @@ Rails.application.routes.draw do
     end
 
     namespace :admin do
-      get :users,    to: "users#index"
+      resources :users, only: %i[index destroy] do
+        resource :subscription, only: %i[show update], controller: "user_subscriptions"
+      end
       get :projects, to: "projects#index"
       get :metrics,  to: "metrics#index"
       resources :plans, only: %i[index show create update destroy]
-      resources :users, only: [] do
-        resource :subscription,
-          only:       %i[show update],
-          controller: "user_subscriptions"
-      end
     end
 
     get   "account",          to: "account#show"
