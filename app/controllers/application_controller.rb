@@ -57,6 +57,34 @@ class ApplicationController < ActionController::API
     end
   end
 
+  # Blocks location creation when subscription is inactive or the plan limit is reached.
+  # Call as a before_action on geo_points#create.
+  def enforce_location_limit!
+    user = current_user
+
+    # Subscription must be active (active or in-trial).
+    unless user.subscription_active?
+      reason = user.trial_expired? ? "Tu período de prueba ha expirado." : "Tu suscripción no está activa."
+      Rails.logger.warn "[LOCATION_LIMIT_BLOCKED] user_id=#{user.id} status=#{user.subscription_status} reason=inactive"
+      render json: { error: reason }, status: :forbidden
+      throw :abort
+    end
+
+    limit = user.effective_location_limit
+    return if limit.nil? # unlimited — no further checks needed
+
+    count = user.current_location_count
+    if count >= limit
+      Rails.logger.warn "[LOCATION_LIMIT_REACHED] user_id=#{user.id} count=#{count} limit=#{limit}"
+      render json: {
+        error: "Has alcanzado el límite de ubicaciones de tu plan (#{limit}).",
+        currentCount: count,
+        limit: limit
+      }, status: :forbidden
+      throw :abort
+    end
+  end
+
   # Convert camelCase keys sent by the JS frontend to snake_case for Rails strong params.
   # e.g. coverImage → cover_image, geoProjectId → geo_project_id
   def normalize_params

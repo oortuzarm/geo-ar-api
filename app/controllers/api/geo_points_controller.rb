@@ -1,10 +1,11 @@
 module Api
   class GeoPointsController < ApplicationController
     before_action :authenticate_user!
-    before_action :set_project,            only: %i[index create]
+    before_action :set_project,               only: %i[index create]
     before_action :authorize_project_access!, only: %i[index create]
-    before_action :set_point,             only: %i[update destroy]
-    before_action :authorize_point_access!, only: %i[update destroy]
+    before_action :enforce_location_limit!,   only: %i[create]
+    before_action :set_point,                 only: %i[update destroy]
+    before_action :authorize_point_access!,   only: %i[update destroy]
 
     # GET /api/geo-projects/:geo_project_id/geo-points
     def index
