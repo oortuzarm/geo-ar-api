@@ -98,7 +98,12 @@ module Api
         id:     user.id,
         email:  user.email,
         role:   user.role,
-        status: user.status
+        status: user.status,
+        subscriptionStatus:     user.subscription_status,
+        trialEndsAt:            user.trial_ends_at&.iso8601,
+        effectiveLocationLimit: user.effective_location_limit,
+        planName:               user.plan&.name,
+        planSlug:               user.plan&.slug,
       }
     end
   end
