@@ -31,6 +31,7 @@ Rails.application.routes.draw do
       get :users,    to: "users#index"
       get :projects, to: "projects#index"
       get :metrics,  to: "metrics#index"
+      resources :plans, only: %i[index show create update destroy]
     end
 
     get   "account",          to: "account#show"
