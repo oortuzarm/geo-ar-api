@@ -5,6 +5,11 @@ class ApplicationController < ActionController::API
     render json: { error: "Not found" }, status: :not_found
   end
 
+  rescue_from UncaughtThrowError do |e|
+    raise e unless e.tag == :abort
+    head :internal_server_error unless performed?
+  end
+
   rescue_from ActiveRecord::RecordInvalid do |e|
     render json: { error: "Validation failed", details: e.record.errors.as_json }, status: :unprocessable_entity
   end
