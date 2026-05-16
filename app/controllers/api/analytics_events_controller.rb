@@ -57,9 +57,9 @@ module Api
       end
     end
 
-    # GET /api/geo_projects/:id/analytics
+    # GET /api/geo_projects/:id/analytics[?point_id=UUID]
     def stats
-      scope = @project.analytics_events
+      scope = point_scoped_events
 
       radius_entries  = scope.where(event_type: "radius_enter").count
       clicks          = scope.where(event_type: "point_click").count
@@ -115,43 +115,36 @@ module Api
       render json: { points: points }
     end
 
-    # GET /api/geo_projects/:id/analytics_by_hour
+    # GET /api/geo_projects/:id/analytics_by_hour[?point_id=UUID]
     # Returns event count grouped by hour of day (0..23, UTC).
-    # Uses .group().count → Hash, same pattern as geo_buckets (avoids AR instance conflicts).
+    # Optional point_id query param narrows results to a single geo_point.
     # Format: { data: [{ hour: 0, count: 12 }, ...] }
     def by_hour
-      counts = @project.analytics_events
-        .group(Arel.sql("EXTRACT(HOUR FROM created_at)::int"))
-        .count
-
-      data = counts.map { |hour, count| { hour: hour.to_i, count: count } }
-                   .sort_by { |h| h[:hour] }
-
+      scope  = point_scoped_events
+      counts = scope.group(Arel.sql("EXTRACT(HOUR FROM created_at)::int")).count
+      data   = counts.map { |hour, count| { hour: hour.to_i, count: count } }
+                     .sort_by { |h| h[:hour] }
       render json: { data: data }
     end
 
-    # GET /api/geo_projects/:id/analytics_by_day
+    # GET /api/geo_projects/:id/analytics_by_day[?point_id=UUID]
     # Returns event count grouped by day of week (0=Sunday..6=Saturday, matches JS getDay()).
-    # PostgreSQL EXTRACT(DOW) = 0 (Sun) … 6 (Sat), aligns with JS getDay().
-    # Uses .group().count → Hash, same pattern as geo_buckets (avoids AR instance conflicts).
+    # Optional point_id query param narrows results to a single geo_point.
     # Format: { data: [{ day: 0, count: 20 }, ...] }
     def by_day
-      counts = @project.analytics_events
-        .group(Arel.sql("EXTRACT(DOW FROM created_at)::int"))
-        .count
-
-      data = counts.map { |day, count| { day: day.to_i, count: count } }
-                   .sort_by { |h| h[:day] }
-
+      scope  = point_scoped_events
+      counts = scope.group(Arel.sql("EXTRACT(DOW FROM created_at)::int")).count
+      data   = counts.map { |day, count| { day: day.to_i, count: count } }
+                     .sort_by { |h| h[:day] }
       render json: { data: data }
     end
 
-    # GET /api/geo_projects/:id/analytics_geo
+    # GET /api/geo_projects/:id/analytics_geo[?point_id=UUID]
     # Returns aggregated geographic distribution (no individual lat/lng exposed).
+    # Optional point_id query param narrows results to a single geo_point.
     # Format: { countries: [{label, count, pct}], cities: [...], communes: [...] }
     def geo_distribution
-      base = @project.analytics_events
-
+      base = point_scoped_events
       render json: {
         countries: geo_buckets(base, :country),
         cities:    geo_buckets(base, :city),
@@ -164,6 +157,28 @@ module Api
     def set_and_authorize_project!
       @project = GeoProject.find(params[:id])
       authorize_project!(@project)
+    end
+
+    # Returns analytics_events scoped to the project, optionally filtered by
+    # a single geo_point when ?point_id= is present in the query string.
+    # Validates that the requested point belongs to this project to prevent data leaks.
+    def point_scoped_events
+      scope = @project.analytics_events
+
+      if params[:point_id].present?
+        Rails.logger.info "[ANALYTICS_POINT_FILTER] action=#{action_name} " \
+                          "project_id=#{@project.id} point_id=#{params[:point_id]}"
+
+        unless @project.geo_points.exists?(id: params[:point_id])
+          render json: { error: "El punto no pertenece a este proyecto." }, status: :not_found
+          throw :abort
+        end
+
+        scope = scope.where(geo_point_id: params[:point_id])
+        Rails.logger.info "[ANALYTICS_POINT_FILTER_APPLIED] geo_point_id=#{params[:point_id]}"
+      end
+
+      scope
     end
 
     # Aggregates a text column into [{label, count, pct}], sorted by count desc.
