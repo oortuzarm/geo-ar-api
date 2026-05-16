@@ -5,11 +5,13 @@ module Api
     before_action :authorize_project_access!, only: %i[show update destroy sync]
 
     # GET /api/geo_projects
+    # Always scoped to current_user regardless of role.
+    # Admin global access lives exclusively in /api/admin.
     def index
-      scope = current_user.role == "admin" ? GeoProject.all : current_user.geo_projects
-      projects = scope.order(updated_at: :desc)
+      projects = current_user.geo_projects.order(updated_at: :desc).to_a
       Rails.logger.info "[GEO_PROJECTS_INDEX_SCOPE] user_id=#{current_user.id} " \
-                        "admin=#{current_user.role == 'admin'} count=#{projects.count}"
+                        "email=#{current_user.email} role=#{current_user.role} " \
+                        "count=#{projects.size} ids=#{projects.map(&:id).inspect}"
       render json: projects.map(&:as_api_json)
     end
 
@@ -28,12 +30,20 @@ module Api
 
     # PUT /api/geo_projects/:id
     def update
+      Rails.logger.info "[GEO_PROJECT_UPDATE_REQUEST] user_id=#{current_user.id} " \
+                        "email=#{current_user.email} role=#{current_user.role} " \
+                        "param_id=#{params[:id]} loaded_project_id=#{@project.id} " \
+                        "loaded_project_owner_id=#{@project.user_id} status_param=#{params[:status].inspect}"
       @project.update!(project_params)
       render json: @project.as_api_json
     end
 
     # DELETE /api/geo_projects/:id
     def destroy
+      Rails.logger.info "[GEO_PROJECT_DESTROY_REQUEST] user_id=#{current_user.id} " \
+                        "email=#{current_user.email} role=#{current_user.role} " \
+                        "param_id=#{params[:id]} loaded_project_id=#{@project.id} " \
+                        "loaded_project_owner_id=#{@project.user_id}"
       @project.destroy!
       head :no_content
     end
@@ -160,11 +170,7 @@ module Api
     end
 
     def set_project
-      @project = if current_user.role == "admin"
-        GeoProject.find(params[:id])
-      else
-        current_user.geo_projects.find(params[:id])
-      end
+      @project = current_user.geo_projects.find(params[:id])
     end
 
     def authorize_project_access!
