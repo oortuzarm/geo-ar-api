@@ -7,7 +7,10 @@ module Api
     # GET /api/geo_projects
     def index
       scope = current_user.role == "admin" ? GeoProject.all : current_user.geo_projects
-      render json: scope.order(updated_at: :desc).map(&:as_api_json)
+      projects = scope.order(updated_at: :desc)
+      Rails.logger.info "[GEO_PROJECTS_INDEX_SCOPE] user_id=#{current_user.id} " \
+                        "admin=#{current_user.role == 'admin'} count=#{projects.count}"
+      render json: projects.map(&:as_api_json)
     end
 
     # GET /api/geo_projects/:id
@@ -157,7 +160,11 @@ module Api
     end
 
     def set_project
-      @project = GeoProject.find(params[:id])
+      @project = if current_user.role == "admin"
+        GeoProject.find(params[:id])
+      else
+        current_user.geo_projects.find(params[:id])
+      end
     end
 
     def authorize_project_access!
