@@ -38,7 +38,7 @@ module Api
           geo_point_id:   params[:point_id],
           event_type:     event_type,
           session_id:     params[:session_id],
-          event_date:     Date.current,
+          event_date:     Date.current
         }
 
         event = AnalyticsEvent.find_or_initialize_by(attrs)

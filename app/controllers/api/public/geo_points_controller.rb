@@ -86,7 +86,7 @@ module Api
             content_type: ct,
             file_url:     file_url,
             file_name:    cd["file_name"],
-            mime_type:    cd["mime_type"],
+            mime_type:    cd["mime_type"]
           }
 
         else
