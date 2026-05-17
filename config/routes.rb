@@ -36,6 +36,8 @@ Rails.application.routes.draw do
       resources :plans, only: %i[index show create update destroy]
     end
 
+    resources :plans, only: %i[index]
+
     get   "account",          to: "account#show"
     patch "account",          to: "account#update"
     patch "account/password", to: "account#update_password"
