@@ -7,14 +7,17 @@ module Api
     # Temporary previews must never be cached — they change state (claim → 410).
     before_action :prevent_caching
 
-    # Best-effort inline cleanup on every request (throttled to once per 10 min).
-    before_action :trigger_inline_cleanup
+    # NOTE: inline cleanup was removed from before_action.
+    # Cleanup runs only via: rake temporary_previews:cleanup (or a future cron job).
+    # Running cleanup synchronously on user requests caused 408 timeouts when
+    # blob deletion made external HTTP calls to Vercel inside the request lifecycle.
 
     # POST /api/temporary_previews
     # Receives the demo project state from /try and persists it for 30 minutes.
     def create
-      points = Array(params[:points])
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
+      points = Array(params[:points])
       log_create_request(points)
 
       if points.empty?
@@ -36,10 +39,13 @@ module Api
         return
       end
 
+      t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
       payload       = build_payload(params[:project], points)
       payload_bytes = payload.to_json.bytesize
 
-      Rails.logger.info "[PREVIEW_CREATE] payload_bytes=#{payload_bytes} limit=#{TemporaryPreview::MAX_PAYLOAD_BYTES}"
+      t2 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Rails.logger.info "[PREVIEW_CREATE] payload_bytes=#{payload_bytes} build_ms=#{((t2 - t1) * 1000).round(1)}"
 
       if payload_bytes > TemporaryPreview::MAX_PAYLOAD_BYTES
         render json: { error: "El payload es demasiado grande." }, status: :unprocessable_entity
@@ -47,6 +53,13 @@ module Api
       end
 
       preview = TemporaryPreview.create!(payload: payload)
+
+      t3 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Rails.logger.info "[PREVIEW_CREATE] done token=#{preview.token[0, 8]}… " \
+        "validate_ms=#{((t1 - t0) * 1000).round(1)} " \
+        "build_ms=#{((t2 - t1) * 1000).round(1)} " \
+        "db_ms=#{((t3 - t2) * 1000).round(1)} " \
+        "total_ms=#{((t3 - t0) * 1000).round(1)}"
 
       render json: preview_created_json(preview), status: :created
 
@@ -352,14 +365,5 @@ module Api
       response.headers["Expires"]       = "0"
     end
 
-    # Fires best-effort, throttled cleanup in a background thread so blob
-    # deletion (external HTTP calls to Vercel) never blocks the response.
-    def trigger_inline_cleanup
-      Thread.new do
-        Rails.application.executor.wrap { TemporaryPreviewsCleanupService.run_inline }
-      end
-    rescue => e
-      Rails.logger.warn "[PREVIEW_CLEANUP] before_action rescue — #{e.message}"
-    end
   end
 end
