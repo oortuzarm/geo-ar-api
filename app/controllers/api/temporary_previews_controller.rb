@@ -68,11 +68,16 @@ module Api
         return
       end
 
+      # ── Billing note ──────────────────────────────────────────────────────────
+      # TODO(Paddle): cuando Paddle esté integrado, este endpoint debe validar
+      # la suscripción/checkout antes de crear el proyecto real.
+      # Punto de extensión sugerido: recibir plan_id o paddle_subscription_id
+      # en el body y verificar contra la API de Paddle antes de proceder.
+      #
       # ── Capacity guard ────────────────────────────────────────────────────────
       # Subscription-active is intentionally NOT checked here: this is the
       # first-conversion path where a brand-new user (no active subscription yet)
-      # turns their demo session into a real account. Blocking by subscription
-      # status would prevent the demo → real flow from ever completing.
+      # turns their demo session into a real account.
       #
       # The hard cap of MAX_POINTS was already enforced when the preview was
       # created, so raw_pts.size is guaranteed ≤ MAX_POINTS at this point.
