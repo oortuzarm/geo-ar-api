@@ -15,6 +15,8 @@ module Api
     def create
       points = Array(params[:points])
 
+      log_create_request(points)
+
       if points.empty?
         render json: { error: "Se requiere al menos una ubicación." }, status: :unprocessable_entity
         return
@@ -34,9 +36,12 @@ module Api
         return
       end
 
-      payload = build_payload(params[:project], points)
+      payload       = build_payload(params[:project], points)
+      payload_bytes = payload.to_json.bytesize
 
-      if payload.to_json.bytesize > TemporaryPreview::MAX_PAYLOAD_BYTES
+      Rails.logger.info "[PREVIEW_CREATE] payload_bytes=#{payload_bytes} limit=#{TemporaryPreview::MAX_PAYLOAD_BYTES}"
+
+      if payload_bytes > TemporaryPreview::MAX_PAYLOAD_BYTES
         render json: { error: "El payload es demasiado grande." }, status: :unprocessable_entity
         return
       end
@@ -44,6 +49,13 @@ module Api
       preview = TemporaryPreview.create!(payload: payload)
 
       render json: preview_created_json(preview), status: :created
+
+    rescue ActiveRecord::RecordInvalid => e
+      Rails.logger.error "[PREVIEW_CREATE] RecordInvalid — #{e.message}"
+      render json: { error: e.message }, status: :unprocessable_entity
+    rescue => e
+      Rails.logger.error "[PREVIEW_CREATE] #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+      render json: { error: "Error al crear preview: #{e.message}" }, status: :unprocessable_entity
     end
 
     # GET /api/temporary_previews/:token
@@ -215,7 +227,11 @@ module Api
     def valid_coordinate?(value, min, max)
       return false if value.nil?
       f = value.to_f
-      f >= min && f <= max && value.to_s =~ /\A-?\d+(\.\d+)?\z/
+      return false unless f >= min && f <= max
+      # JSON-parsed numbers (Float/Integer) are already trusted; string inputs
+      # get a format check to reject non-numeric values.
+      return true if value.is_a?(Numeric)
+      value.to_s.match?(/\A-?\d+(\.\d+)?\z/)
     end
 
     # ── Payload construction ────────────────────────────────────────────────────
@@ -247,20 +263,23 @@ module Api
 
     def extract_point(p)
       {
-        id:               SecureRandom.uuid,
-        name:             p[:name].to_s.strip,
-        latitude:         p[:latitude].to_f,
-        longitude:        p[:longitude].to_f,
+        id:                SecureRandom.uuid,
+        name:              p[:name].to_s.strip,
+        latitude:          p[:latitude].to_f,
+        longitude:         p[:longitude].to_f,
         activation_radius: (p[:activation_radius] || 50).to_i,
-        content_type:     p[:content_type].presence || "url",
-        content_data:     p[:content_data],
-        image:            p[:image],
-        description:      p[:description].to_s,
-        instructions:     p[:instructions].to_s,
-        button_text:      p[:button_text].to_s,
-        active:           p.fetch(:active, true),
-        order:            (p[:order] || 0).to_i,
-        availability:     p[:availability] || {}
+        content_type:      p[:content_type].presence || "url",
+        # safe_hash converts ActionController::Parameters → plain Hash so the
+        # JSONB serializer never encounters unpermitted params in the payload.
+        content_data:      safe_hash(p[:content_data]),
+        lookiar_url:       p[:lookiar_url].to_s,
+        image:             p[:image],
+        description:       p[:description].to_s,
+        instructions:      p[:instructions].to_s,
+        button_text:       p[:button_text].to_s,
+        active:            p.fetch(:active, true),
+        order:             (p[:order] || 0).to_i,
+        availability:      safe_hash(p[:availability]) || {}
       }
     end
 
@@ -302,6 +321,29 @@ module Api
       Plan.find_by(slug: slug)
     end
 
+    # Converts ActionController::Parameters or Hash → plain Hash; nil-safe.
+    # to_unsafe_h recursively converts all nested params, returning a
+    # HashWithIndifferentAccess (a Hash subclass) that is safe for JSONB storage.
+    def safe_hash(value)
+      return nil if value.nil?
+      value.respond_to?(:to_unsafe_h) ? value.to_unsafe_h : value
+    end
+
+    def log_create_request(points)
+      pt0 = points.first
+      Rails.logger.info(
+        "[PREVIEW_CREATE] points=#{points.size} " \
+        "project_keys=#{params[:project]&.keys&.join(',')} " \
+        "pt0_keys=#{pt0&.keys&.join(',')} " \
+        "pt0_content_type=#{pt0&.dig(:content_type).inspect} " \
+        "pt0_content_data_class=#{pt0&.dig(:content_data).class} " \
+        "pt0_content_data_keys=#{pt0&.dig(:content_data).respond_to?(:keys) ? pt0.dig(:content_data).keys.join(',') : 'n/a'} " \
+        "pt0_lookiar_url=#{pt0&.dig(:lookiar_url).inspect} " \
+        "pt0_availability_class=#{pt0&.dig(:availability).class} " \
+        "pt0_image_present=#{pt0&.dig(:image).present?}"
+      )
+    end
+
     # Instructs browsers and proxies never to store or reuse preview responses.
     # Without this, a cached 200 would survive the claim and keep returning 304.
     def prevent_caching
@@ -310,9 +352,12 @@ module Api
       response.headers["Expires"]       = "0"
     end
 
-    # Fires best-effort, throttled cleanup — never raises or blocks the response.
+    # Fires best-effort, throttled cleanup in a background thread so blob
+    # deletion (external HTTP calls to Vercel) never blocks the response.
     def trigger_inline_cleanup
-      TemporaryPreviewsCleanupService.run_inline
+      Thread.new do
+        Rails.application.executor.wrap { TemporaryPreviewsCleanupService.run_inline }
+      end
     rescue => e
       Rails.logger.warn "[PREVIEW_CLEANUP] before_action rescue — #{e.message}"
     end
