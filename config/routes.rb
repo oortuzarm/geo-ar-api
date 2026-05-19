@@ -42,6 +42,9 @@ Rails.application.routes.draw do
     patch "account",          to: "account#update"
     patch "account/password", to: "account#update_password"
 
+    # Public temporary previews — no auth required, token-addressed.
+    resources :temporary_previews, only: %i[create show], param: :token
+
     resources :analytics_events, only: %i[create]
 
     # Standalone update/delete for geo_points
