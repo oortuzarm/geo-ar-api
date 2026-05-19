@@ -22,9 +22,12 @@ class TemporaryPreviewsCleanupService
   # Run synchronously and return a result hash. Called by rake task and run_inline.
   # Never raises — all failures are caught and logged.
   def run
+    # Claimed previews have no blobs (payload cleared at claim time) — bulk delete.
+    claimed_count = TemporaryPreview.claimed.delete_all
+
     expired = TemporaryPreview.where("expires_at < ?", Time.current)
     total   = expired.count
-    return { total: 0 } if total.zero?
+    return { total: 0, claimed_deleted: claimed_count } if total.zero?
 
     blob_token_present = ENV["BLOB_READ_WRITE_TOKEN"].present?
     unless blob_token_present
@@ -66,7 +69,8 @@ class TemporaryPreviewsCleanupService
     end
 
     { total: total, deleted_rows: deleted_rows, deleted_blobs: deleted_blobs,
-      skipped_blobs: skipped_blobs, failed_blobs: failed_blobs }
+      skipped_blobs: skipped_blobs, failed_blobs: failed_blobs,
+      claimed_deleted: claimed_count }
   end
 
   private

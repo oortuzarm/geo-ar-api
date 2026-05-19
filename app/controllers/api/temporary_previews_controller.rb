@@ -44,9 +44,15 @@ module Api
     end
 
     # GET /api/temporary_previews/:token
-    # Returns the stored payload if not expired, 410 if expired, 404 if absent.
+    # Returns the stored payload if still active.
+    # 410 if claimed, 410 if expired, 404 if absent.
     def show
       preview = TemporaryPreview.find_by!(token: params[:token])
+
+      if preview.claimed?
+        render json: { error: "Esta preview ya fue convertida en un proyecto real." }, status: :gone
+        return
+      end
 
       if preview.expired?
         render json: { error: "Este preview ha expirado." }, status: :gone
@@ -66,6 +72,11 @@ module Api
     # TODO(Paddle): once checkout is integrated, verify payment before assigning the plan.
     def claim
       preview = TemporaryPreview.find_by!(token: params[:token])
+
+      if preview.claimed?
+        render json: { error: "Esta preview ya fue convertida en un proyecto real." }, status: :gone
+        return
+      end
 
       if preview.expired?
         render json: { error: "Este preview ha expirado." }, status: :gone
@@ -101,12 +112,21 @@ module Api
       end
 
       # ── Claim inside a locked transaction ─────────────────────────────────────
-      # with_lock reloads the row with SELECT FOR UPDATE.
-      # If a concurrent request already destroyed the preview, lock! raises
-      # RecordNotFound → handled by ApplicationController rescue_from → 404.
-      project = nil
+      # with_lock reloads the row with SELECT FOR UPDATE, so preview reflects the
+      # latest DB state at lock time. already_claimed handles the race where two
+      # simultaneous requests both pass the pre-lock check but only the first
+      # should create the project.
+      project       = nil
+      already_claimed = false
 
       preview.with_lock do
+        # Re-check after acquiring the lock — another request may have claimed
+        # this preview between our pre-lock check and now.
+        if preview.claimed?
+          already_claimed = true
+          next
+        end
+
         raw_project = preview.payload["project"] || {}
         points_data = preview.payload["points"]  || []
 
@@ -159,8 +179,15 @@ module Api
           current_user.update!(plan_attrs)
         end
 
-        # Destroy the preview — it has been claimed and is no longer needed.
-        preview.destroy!
+        # Soft-invalidate the preview. Keeps the row so GET /temporary/:token
+        # can return 410 "already claimed" instead of a generic 404.
+        # Payload is cleared to avoid retaining user data beyond claim time.
+        preview.update!(claimed_at: Time.current, payload: {})
+      end
+
+      if already_claimed
+        render json: { error: "Esta preview ya fue convertida en un proyecto real." }, status: :gone
+        return
       end
 
       base = ENV.fetch("APP_BASE_URL", "https://studio.ubyca.com")
