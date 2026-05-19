@@ -122,7 +122,7 @@ module Api
       base = ENV.fetch("APP_BASE_URL", "https://studio.ubyca.com")
       {
         token:     preview.token,
-        publicUrl: "#{base}/preview/#{preview.token}",
+        publicUrl: "#{base}/temporary/#{preview.token}",
         expiresAt: preview.expires_at.iso8601(3)
       }
     end
