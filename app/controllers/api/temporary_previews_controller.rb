@@ -60,6 +60,10 @@ module Api
     # Authenticated. Converts the preview into a real GeoProject owned by current_user.
     # Idempotency: the preview is destroyed after a successful claim; a second call gets 404.
     # Race conditions: with_lock (SELECT FOR UPDATE) prevents double-processing.
+    #
+    # Optional body param: planKey (converted to plan_key by normalize_params).
+    # If present, assigns the plan to the user using the same plan_id field that admin uses.
+    # TODO(Paddle): once checkout is integrated, verify payment before assigning the plan.
     def claim
       preview = TemporaryPreview.find_by!(token: params[:token])
 
@@ -68,12 +72,17 @@ module Api
         return
       end
 
-      # ── Billing note ──────────────────────────────────────────────────────────
-      # TODO(Paddle): cuando Paddle esté integrado, este endpoint debe validar
-      # la suscripción/checkout antes de crear el proyecto real.
-      # Punto de extensión sugerido: recibir plan_id o paddle_subscription_id
-      # en el body y verificar contra la API de Paddle antes de proceder.
-      #
+      # ── Plan resolution (pre-Paddle: assigns plan without verifying payment) ──
+      # normalize_params converts incoming camelCase planKey → plan_key.
+      plan = nil
+      if params[:plan_key].present?
+        plan = resolve_plan(params[:plan_key])
+        if plan.nil?
+          render json: { error: "Plan '#{params[:plan_key]}' no encontrado." }, status: :unprocessable_entity
+          return
+        end
+      end
+
       # ── Capacity guard ────────────────────────────────────────────────────────
       # Subscription-active is intentionally NOT checked here: this is the
       # first-conversion path where a brand-new user (no active subscription yet)
@@ -132,6 +141,22 @@ module Api
             order:             pt["order"] || idx,
             availability:      pt["availability"] || {}
           )
+        end
+
+        # ── Plan assignment (same field admin uses; no payment activation yet) ──
+        # TODO(Paddle): before updating plan_id here, verify the Paddle checkout
+        # session or subscription is valid and paid.
+        if plan
+          plan_attrs = { plan_id: plan.id }
+          if plan.has_trial && plan.trial_days.to_i > 0
+            now = Time.current
+            plan_attrs[:subscription_status] = "trial"
+            plan_attrs[:trial_starts_at]     = now
+            plan_attrs[:trial_ends_at]       = now + plan.trial_days.days
+          else
+            plan_attrs[:subscription_status] = "active"
+          end
+          current_user.update!(plan_attrs)
         end
 
         # Destroy the preview — it has been claimed and is no longer needed.
@@ -241,6 +266,10 @@ module Api
       else
         obj
       end
+    end
+
+    def resolve_plan(slug)
+      Plan.find_by(slug: slug)
     end
 
     # Fires best-effort, throttled cleanup — never raises or blocks the response.
