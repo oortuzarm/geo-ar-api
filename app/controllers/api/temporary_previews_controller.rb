@@ -3,6 +3,9 @@ module Api
     # No authentication — /try is a public, unauthenticated flow.
     skip_before_action :authenticate_user!, raise: false
 
+    # Best-effort inline cleanup on every create and show request (throttled to once per 10 min).
+    before_action :trigger_inline_cleanup
+
     # POST /api/temporary_previews
     # Receives the demo project state from /try and persists it for 30 minutes.
     def create
@@ -148,6 +151,13 @@ module Api
       else
         obj
       end
+    end
+
+    # Fires best-effort, throttled cleanup — never raises or blocks the response.
+    def trigger_inline_cleanup
+      TemporaryPreviewsCleanupService.run_inline
+    rescue => e
+      Rails.logger.warn "[PREVIEW_CLEANUP] before_action rescue — #{e.message}"
     end
   end
 end
