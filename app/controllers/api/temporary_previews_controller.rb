@@ -1,9 +1,10 @@
 module Api
   class TemporaryPreviewsController < ApplicationController
-    # No authentication — /try is a public, unauthenticated flow.
-    skip_before_action :authenticate_user!, raise: false
+    # create and show are public; claim requires authentication.
+    skip_before_action :authenticate_user!, except: %i[claim], raise: false
+    before_action :authenticate_user!, only: %i[claim]
 
-    # Best-effort inline cleanup on every create and show request (throttled to once per 10 min).
+    # Best-effort inline cleanup on every request (throttled to once per 10 min).
     before_action :trigger_inline_cleanup
 
     # POST /api/temporary_previews
@@ -53,6 +54,96 @@ module Api
       end
 
       render json: preview_show_json(preview)
+    end
+
+    # POST /api/temporary_previews/:token/claim
+    # Authenticated. Converts the preview into a real GeoProject owned by current_user.
+    # Idempotency: the preview is destroyed after a successful claim; a second call gets 404.
+    # Race conditions: with_lock (SELECT FOR UPDATE) prevents double-processing.
+    def claim
+      preview = TemporaryPreview.find_by!(token: params[:token])
+
+      if preview.expired?
+        render json: { error: "Este preview ha expirado." }, status: :gone
+        return
+      end
+
+      # ── Subscription + capacity checks (before touching the DB) ───────────────
+      unless current_user.subscription_active?
+        msg = current_user.trial_expired? ? "Tu período de prueba ha expirado." \
+                                          : "Tu suscripción no está activa."
+        render json: { error: msg }, status: :forbidden
+        return
+      end
+
+      raw_pts = preview.payload["points"] || []
+
+      if raw_pts.any?
+        limit = current_user.effective_location_limit
+        if limit
+          available = limit - current_user.current_location_count
+          if raw_pts.size > available
+            render json: {
+              error: "Tu plan permite agregar #{[available, 0].max} ubicación(es) más. " \
+                     "Este preview tiene #{raw_pts.size}."
+            }, status: :forbidden
+            return
+          end
+        end
+      end
+
+      # ── Claim inside a locked transaction ─────────────────────────────────────
+      # with_lock reloads the row with SELECT FOR UPDATE.
+      # If a concurrent request already destroyed the preview, lock! raises
+      # RecordNotFound → handled by ApplicationController rescue_from → 404.
+      project = nil
+
+      preview.with_lock do
+        raw_project = preview.payload["project"] || {}
+        points_data = preview.payload["points"]  || []
+
+        project = current_user.geo_projects.create!(
+          title:                     raw_project["title"].presence || "Mi experiencia",
+          subtitle:                  raw_project["subtitle"].to_s,
+          description:               raw_project["description"].to_s,
+          cover_image:               raw_project["cover_image"],
+          how_to_get:                raw_project["how_to_get"].to_s,
+          share_text:                raw_project["share_text"].to_s,
+          public_initial_view_mode:  raw_project["public_initial_view_mode"].presence || "fit_points",
+          public_initial_center_lat: raw_project["public_initial_center_lat"],
+          public_initial_center_lng: raw_project["public_initial_center_lng"],
+          public_initial_zoom:       raw_project["public_initial_zoom"],
+          status:                    "draft"
+        )
+
+        points_data.each_with_index do |pt, idx|
+          project.geo_points.create!(
+            name:              pt["name"].to_s.presence || "Punto #{idx + 1}",
+            lookiar_url:       pt["lookiar_url"].to_s,
+            latitude:          pt["latitude"].to_f,
+            longitude:         pt["longitude"].to_f,
+            activation_radius: (pt["activation_radius"] || 50).to_i,
+            content_type:      pt["content_type"].presence || "url",
+            content_data:      pt["content_data"] || {},
+            image:             pt["image"],
+            description:       pt["description"].to_s,
+            instructions:      pt["instructions"].to_s,
+            button_text:       pt["button_text"].to_s,
+            active:            pt.fetch("active", true),
+            order:             pt["order"] || idx,
+            availability:      pt["availability"] || {}
+          )
+        end
+
+        # Destroy the preview — it has been claimed and is no longer needed.
+        preview.destroy!
+      end
+
+      base = ENV.fetch("APP_BASE_URL", "https://studio.ubyca.com")
+      render json: {
+        projectId:   project.id,
+        redirectUrl: "#{base}/project/#{project.id}"
+      }, status: :created
     end
 
     private
