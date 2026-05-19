@@ -68,28 +68,22 @@ module Api
         return
       end
 
-      # ── Subscription + capacity checks (before touching the DB) ───────────────
-      unless current_user.subscription_active?
-        msg = current_user.trial_expired? ? "Tu período de prueba ha expirado." \
-                                          : "Tu suscripción no está activa."
-        render json: { error: msg }, status: :forbidden
-        return
-      end
-
+      # ── Capacity guard ────────────────────────────────────────────────────────
+      # Subscription-active is intentionally NOT checked here: this is the
+      # first-conversion path where a brand-new user (no active subscription yet)
+      # turns their demo session into a real account. Blocking by subscription
+      # status would prevent the demo → real flow from ever completing.
+      #
+      # The hard cap of MAX_POINTS was already enforced when the preview was
+      # created, so raw_pts.size is guaranteed ≤ MAX_POINTS at this point.
+      # We re-assert it here as a belt-and-suspenders safety guard only.
       raw_pts = preview.payload["points"] || []
 
-      if raw_pts.any?
-        limit = current_user.effective_location_limit
-        if limit
-          available = limit - current_user.current_location_count
-          if raw_pts.size > available
-            render json: {
-              error: "Tu plan permite agregar #{[available, 0].max} ubicación(es) más. " \
-                     "Este preview tiene #{raw_pts.size}."
-            }, status: :forbidden
-            return
-          end
-        end
+      if raw_pts.size > TemporaryPreview::MAX_POINTS
+        render json: {
+          error: "El preview supera el límite de #{TemporaryPreview::MAX_POINTS} ubicaciones."
+        }, status: :unprocessable_entity
+        return
       end
 
       # ── Claim inside a locked transaction ─────────────────────────────────────
