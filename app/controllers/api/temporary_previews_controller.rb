@@ -4,6 +4,9 @@ module Api
     skip_before_action :authenticate_user!, except: %i[claim], raise: false
     before_action :authenticate_user!, only: %i[claim]
 
+    # Temporary previews must never be cached — they change state (claim → 410).
+    before_action :prevent_caching
+
     # Best-effort inline cleanup on every request (throttled to once per 10 min).
     before_action :trigger_inline_cleanup
 
@@ -297,6 +300,14 @@ module Api
 
     def resolve_plan(slug)
       Plan.find_by(slug: slug)
+    end
+
+    # Instructs browsers and proxies never to store or reuse preview responses.
+    # Without this, a cached 200 would survive the claim and keep returning 304.
+    def prevent_caching
+      response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+      response.headers["Pragma"]        = "no-cache"
+      response.headers["Expires"]       = "0"
     end
 
     # Fires best-effort, throttled cleanup — never raises or blocks the response.
