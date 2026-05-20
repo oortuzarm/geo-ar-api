@@ -43,8 +43,30 @@ module Api
       # DELETE /api/admin/users/:id
       def destroy
         user = User.find(params[:id])
+
+        if user.id == current_user.id
+          render json: { error: "No puedes eliminar tu propia cuenta." }, status: :forbidden
+          return
+        end
+
+        if user.role == "admin" && User.where(role: "admin").count <= 1
+          render json: { error: "No puedes eliminar al único administrador del sistema." }, status: :unprocessable_entity
+          return
+        end
+
+        Rails.logger.info "[USER_DELETE] admin=#{current_user.id} target=#{user.id} email=#{user.email}"
         user.destroy!
+        Rails.logger.info "[USER_DELETE] success target=#{user.id}"
         head :no_content
+
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "Usuario no encontrado." }, status: :not_found
+      rescue ActiveRecord::RecordNotDestroyed => e
+        Rails.logger.error "[USER_DELETE] RecordNotDestroyed user=#{user.id} — #{e.message}"
+        render json: { error: "No se pudo eliminar el usuario." }, status: :unprocessable_entity
+      rescue StandardError => e
+        Rails.logger.error "[USER_DELETE] #{e.class} user=#{user.id} — #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+        render json: { error: "Error al eliminar el usuario. Revisa los logs." }, status: :internal_server_error
       end
     end
   end

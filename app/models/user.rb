@@ -2,11 +2,14 @@ class User < ApplicationRecord
   has_secure_password
   belongs_to :plan, optional: true
 
-  has_many :geo_projects,          dependent: :nullify
+  has_many :geo_projects,          dependent: :destroy
   has_many :password_reset_tokens, dependent: :destroy
   has_many :memberships,           dependent: :destroy
   has_many :organizations,         through:   :memberships
-  has_many :sent_invitations,      class_name: "Invitation", foreign_key: :invited_by_id, dependent: :nullify
+  # invited_by_id is NOT NULL in the DB — must destroy, not nullify.
+  has_many :sent_invitations,      class_name: "Invitation", foreign_key: :invited_by_id, dependent: :destroy
+
+  before_destroy :purge_sole_owned_organizations
 
   ROLES                 = %w[user admin].freeze
   STATUSES              = %w[active suspended].freeze
@@ -68,5 +71,16 @@ class User < ApplicationRecord
     return true if limit.nil? # unlimited plan
 
     current_location_count < limit
+  end
+
+  private
+
+  # Destroy organizations where this user is the sole member before the user
+  # is deleted. Without this, the org would become an empty orphan (no members).
+  # Cascades via Organization.has_many :memberships/:invitations, dependent: :destroy.
+  def purge_sole_owned_organizations
+    organizations.each do |org|
+      org.destroy! if org.memberships.count == 1
+    end
   end
 end
