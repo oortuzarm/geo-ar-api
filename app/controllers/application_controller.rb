@@ -27,6 +27,7 @@ class ApplicationController < ActionController::API
 
   def authenticate_user!
     unless current_user
+      Rails.logger.warn "[AUTH_DENIED] controller=#{self.class.name} action=#{action_name} path=#{request.path}"
       render json: { error: "No autenticado" }, status: :unauthorized
       throw :abort
     end

@@ -1,12 +1,14 @@
 module Api
   class PlansController < ApplicationController
-    # index is public — used by studio (authenticated) and by the landing page
-    # (ubyca.com/precios, credentials: 'omit', no session cookie).
-    skip_before_action :authenticate_user!, only: [:index], raise: false
+    # index is public — landing page (ubyca.com/precios) fetches it without a session.
+    # Any future action added here requires auth by default.
+    before_action :authenticate_user!
+    skip_before_action :authenticate_user!, only: [:index]
     before_action :handle_landing_cors, only: [:index]
 
     # GET /api/plans
     def index
+      Rails.logger.info "[PLANS_PUBLIC] index reached without auth"
       plans = Plan.where(is_visible: true).order(sort_order: :asc, created_at: :asc)
       render json: plans.map { |p| plan_json(p) }
     end
