@@ -78,12 +78,12 @@ module Api
       preview = TemporaryPreview.find_by!(token: params[:token])
 
       if preview.claimed?
-        render json: { error: "Esta preview ya fue convertida en un proyecto real." }, status: :gone
+        render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
 
       if preview.expired?
-        render json: { error: "Este preview ha expirado." }, status: :gone
+        render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
 
@@ -102,7 +102,7 @@ module Api
       preview = TemporaryPreview.find_by!(token: params[:token])
 
       if preview.claimed?
-        render json: { error: "Esta preview ya fue convertida en un proyecto real." }, status: :gone
+        render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
 
@@ -214,7 +214,7 @@ module Api
       end
 
       if already_claimed
-        render json: { error: "Esta preview ya fue convertida en un proyecto real." }, status: :gone
+        render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
 
