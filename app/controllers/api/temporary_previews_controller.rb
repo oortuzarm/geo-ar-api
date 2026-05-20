@@ -75,18 +75,29 @@ module Api
     # Returns the stored payload if still active.
     # 410 if claimed, 410 if expired, 404 if absent.
     def show
+      tok_short = params[:token].to_s[0, 8]
+      has_col   = TemporaryPreview.column_names.include?("claimed_at")
+      Rails.logger.info "[TEMP_PREVIEW] show start token=#{tok_short}… has_claimed_at_col=#{has_col}"
+
       preview = TemporaryPreview.find_by!(token: params[:token])
 
+      claimed_at_val = has_col ? preview.read_attribute(:claimed_at).inspect : "col_missing"
+      Rails.logger.info "[TEMP_PREVIEW] show found preview=#{preview.id} " \
+        "claimed_at=#{claimed_at_val} claimed?=#{preview.claimed?} expired?=#{preview.expired?}"
+
       if preview.claimed?
+        Rails.logger.info "[TEMP_PREVIEW] show → 410 claimed"
         render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
 
       if preview.expired?
+        Rails.logger.info "[TEMP_PREVIEW] show → 410 expired"
         render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
 
+      Rails.logger.info "[TEMP_PREVIEW] show → 200 ok"
       render json: preview_show_json(preview)
     end
 
@@ -99,14 +110,24 @@ module Api
     # If present, assigns the plan to the user using the same plan_id field that admin uses.
     # TODO(Paddle): once checkout is integrated, verify payment before assigning the plan.
     def claim
+      tok_short = params[:token].to_s[0, 8]
+      has_col   = TemporaryPreview.column_names.include?("claimed_at")
+      Rails.logger.info "[TEMP_PREVIEW] claim start token=#{tok_short}… has_claimed_at_col=#{has_col}"
+
       preview = TemporaryPreview.find_by!(token: params[:token])
 
+      claimed_at_before = has_col ? preview.read_attribute(:claimed_at).inspect : "col_missing"
+      Rails.logger.info "[TEMP_PREVIEW] claim found preview=#{preview.id} " \
+        "claimed_at_before=#{claimed_at_before} claimed?=#{preview.claimed?} expired?=#{preview.expired?}"
+
       if preview.claimed?
+        Rails.logger.info "[TEMP_PREVIEW] claim → 410 pre-lock already claimed"
         render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
 
       if preview.expired?
+        Rails.logger.info "[TEMP_PREVIEW] claim → 410 expired"
         render json: { error: "Este preview ha expirado." }, status: :gone
         return
       end
@@ -121,6 +142,8 @@ module Api
           return
         end
       end
+
+      Rails.logger.info "[TEMP_PREVIEW] claim plan=#{plan&.slug.inspect} pts=#{(preview.payload["points"] || []).size}"
 
       # ── Capacity guard ────────────────────────────────────────────────────────
       # Subscription-active is intentionally NOT checked here: this is the
@@ -144,16 +167,21 @@ module Api
       # latest DB state at lock time. already_claimed handles the race where two
       # simultaneous requests both pass the pre-lock check but only the first
       # should create the project.
-      project       = nil
+      project         = nil
       already_claimed = false
+
+      Rails.logger.info "[TEMP_PREVIEW] claim entering with_lock preview=#{preview.id}"
 
       preview.with_lock do
         # Re-check after acquiring the lock — another request may have claimed
         # this preview between our pre-lock check and now.
         if preview.claimed?
+          Rails.logger.info "[TEMP_PREVIEW] claim inside lock: already_claimed → skip"
           already_claimed = true
           next
         end
+
+        Rails.logger.info "[TEMP_PREVIEW] claim inside lock: not claimed, proceeding"
 
         raw_project = preview.payload["project"] || {}
         points_data = preview.payload["points"]  || []
@@ -171,6 +199,8 @@ module Api
           public_initial_zoom:       raw_project["public_initial_zoom"],
           status:                    "draft"
         )
+
+        Rails.logger.info "[TEMP_PREVIEW] claim inside lock: project created project=#{project.id} pts=#{points_data.size}"
 
         points_data.each_with_index do |pt, idx|
           project.geo_points.create!(
@@ -191,6 +221,8 @@ module Api
           )
         end
 
+        Rails.logger.info "[TEMP_PREVIEW] claim inside lock: #{points_data.size} geo_point(s) created"
+
         # ── Plan assignment (same field admin uses; no payment activation yet) ──
         # TODO(Paddle): before updating plan_id here, verify the Paddle checkout
         # session or subscription is valid and paid.
@@ -205,18 +237,28 @@ module Api
             plan_attrs[:subscription_status] = "active"
           end
           current_user.update!(plan_attrs)
+          Rails.logger.info "[TEMP_PREVIEW] claim inside lock: user plan updated plan=#{plan.slug} status=#{plan_attrs[:subscription_status]}"
         end
 
         # Soft-invalidate the preview. Keeps the row so GET /temporary/:token
         # can return 410 "already claimed" instead of a generic 404.
         # Payload is cleared to avoid retaining user data beyond claim time.
+        Rails.logger.info "[TEMP_PREVIEW] claim inside lock: about to update preview claimed_at has_col=#{has_col}"
         preview.update!(claimed_at: Time.current, payload: {})
+
+        claimed_at_after = has_col ? preview.read_attribute(:claimed_at).inspect : "col_missing"
+        Rails.logger.info "[TEMP_PREVIEW] claim inside lock: preview updated claimed_at_after=#{claimed_at_after}"
       end
 
+      Rails.logger.info "[TEMP_PREVIEW] claim with_lock committed already_claimed=#{already_claimed}"
+
       if already_claimed
+        Rails.logger.info "[TEMP_PREVIEW] claim → 410 post-lock already claimed"
         render json: { error: "Esta previsualización ya no está disponible." }, status: :gone
         return
       end
+
+      Rails.logger.info "[TEMP_PREVIEW] claim → 201 success project=#{project&.id}"
 
       base = ENV.fetch("APP_BASE_URL", "https://studio.ubyca.com")
       render json: {
