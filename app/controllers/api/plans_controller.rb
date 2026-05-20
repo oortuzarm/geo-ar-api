@@ -1,15 +1,32 @@
 module Api
   class PlansController < ApplicationController
-    before_action :authenticate_user!
+    # index is public — used by studio (authenticated) and by the landing page
+    # (ubyca.com/precios, credentials: 'omit', no session cookie).
+    skip_before_action :authenticate_user!, only: [:index], raise: false
+    before_action :handle_landing_cors, only: [:index]
 
     # GET /api/plans
-    # Returns visible plans for the authenticated user (non-admin).
     def index
       plans = Plan.where(is_visible: true).order(sort_order: :asc, created_at: :asc)
       render json: plans.map { |p| plan_json(p) }
     end
 
     private
+
+    # Belt-and-suspenders CORS for landing page origins.
+    # rack-cors (position 0) should handle this, but explicit headers here survive
+    # any middleware ordering or version quirks. Logged so Railway logs confirm receipt.
+    def handle_landing_cors
+      origin = request.headers["Origin"].to_s
+      Rails.logger.info "[CORS_DEBUG] plans origin=#{origin.inspect} method=#{request.method}"
+      return unless LANDING_ORIGINS.include?(origin)
+
+      response.headers["Access-Control-Allow-Origin"]  = origin
+      response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, HEAD"
+      response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept"
+      response.headers["Vary"]                         = "Origin"
+      Rails.logger.info "[CORS_DEBUG] plans → ACAO=#{origin}"
+    end
 
     def plan_json(plan)
       {

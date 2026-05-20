@@ -34,3 +34,29 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
              credentials: false
   end
 end
+
+# Temporary diagnostic middleware — logs what rack-cors decided for landing origins.
+# Remove once CORS from ubyca.com is confirmed working in Railway logs.
+Rails.application.config.middleware.use(Class.new do
+  def initialize(app)
+    @app = app
+  end
+
+  def call(env)
+    origin = env["HTTP_ORIGIN"].to_s
+    path   = env["PATH_INFO"].to_s
+    is_landing = origin.match?(/\Ahttps?:\/\/(www\.)?ubyca\.com\z/) &&
+                 !origin.include?("studio")
+
+    Rails.logger.info "[CORS_MW] in  origin=#{origin.inspect} path=#{path}" if is_landing
+
+    status, headers, body = @app.call(env)
+
+    if is_landing
+      acao = headers["Access-Control-Allow-Origin"].inspect
+      Rails.logger.info "[CORS_MW] out origin=#{origin.inspect} path=#{path} acao=#{acao} status=#{status}"
+    end
+
+    [status, headers, body]
+  end
+end)
