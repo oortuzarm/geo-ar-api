@@ -56,6 +56,7 @@ module Api
         :activation_radius, :image, :description,
         :instructions, :active, :order, :button_text,
         content_data: {},
+        images: [:id, :url, :is_cover, :is_Cover, :isCover, :position],
         availability: [
           :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
           :schedule_start_time, :schedule_end_time,

@@ -236,6 +236,7 @@ module Api
             content_type:      pt["content_type"].presence || "url",
             content_data:      pt["content_data"] || {},
             image:             pt["image"],
+            images:            pt["images"] || [],
             description:       pt["description"].to_s,
             instructions:      pt["instructions"].to_s,
             button_text:       pt["button_text"].to_s,
@@ -353,6 +354,7 @@ module Api
         content_data:      safe_hash(p[:content_data]),
         lookiar_url:       p[:lookiar_url].to_s,
         image:             p[:image],
+        images:            safe_images(p[:images]),
         description:       p[:description].to_s,
         instructions:      p[:instructions].to_s,
         button_text:       p[:button_text].to_s,
@@ -416,6 +418,24 @@ module Api
     def safe_hash(value)
       return nil if value.nil?
       value.respond_to?(:to_unsafe_h) ? value.to_unsafe_h : value
+    end
+
+    # Converts an images params array → plain array of normalized hashes.
+    # Strips non-Blob URLs so demo sessions can't smuggle base64 or arbitrary URLs.
+    def safe_images(value)
+      return [] unless value.is_a?(Array) || value.respond_to?(:to_a)
+      Array(value).map do |img|
+        h = img.respond_to?(:to_unsafe_h) ? img.to_unsafe_h.to_h.stringify_keys : img.to_h.stringify_keys
+        url = h["url"].to_s
+        # Only keep URLs that look like real CDN URLs (not base64 data URIs)
+        next unless url.start_with?("https://")
+        {
+          "id"       => h["id"].to_s,
+          "url"      => url,
+          "is_cover" => h["is_cover"] == true || h["isCover"] == true,
+          "position" => (h["position"] || 0).to_i
+        }
+      end.compact
     end
 
     def log_create_request(points)

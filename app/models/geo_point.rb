@@ -30,6 +30,7 @@ class GeoPoint < ApplicationRecord
       longitude:        longitude,
       activationRadius: activation_radius,
       image:            image,
+      images:           camelize_images(images),
       description:      description,
       instructions:     instructions,
       buttonText:       button_text,
@@ -39,6 +40,13 @@ class GeoPoint < ApplicationRecord
     }
   end
 
+  # Normalize incoming images array before storing in JSONB.
+  # Accepts ActionController::Parameters arrays and plain arrays.
+  def images=(val)
+    normalized = normalize_images(val)
+    super(normalized)
+  end
+
   private
 
   # JSONB availability is stored in snake_case (normalize_params converts keys on ingest).
@@ -46,5 +54,32 @@ class GeoPoint < ApplicationRecord
   def camelize_availability(hash)
     return {} unless hash.is_a?(Hash)
     hash.transform_keys { |k| k.to_s.camelize(:lower) }
+  end
+
+  # Images are stored with snake_case keys; convert to camelCase for the JS frontend.
+  def camelize_images(arr)
+    return [] unless arr.is_a?(Array)
+    arr.map do |img|
+      next unless img.is_a?(Hash)
+      {
+        id:      img["id"]       || img[:id],
+        url:     img["url"]      || img[:url],
+        isCover: img["is_cover"] || img[:is_cover] || false,
+        position: (img["position"] || img[:position] || 0).to_i
+      }
+    end.compact
+  end
+
+  def normalize_images(val)
+    return [] unless val.is_a?(Array)
+    val.map.with_index do |img, idx|
+      h = img.respond_to?(:to_unsafe_h) ? img.to_unsafe_h.to_h.stringify_keys : img.to_h.stringify_keys
+      {
+        "id"       => h["id"].to_s,
+        "url"      => h["url"].to_s,
+        "is_cover" => h["is_cover"] == true || h["isCover"] == true || h["is_cover"] == "true",
+        "position" => (h["position"] || idx).to_i
+      }
+    end
   end
 end
