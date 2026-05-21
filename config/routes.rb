@@ -42,8 +42,8 @@ Rails.application.routes.draw do
     patch "account",          to: "account#update"
     patch "account/password", to: "account#update_password"
 
-    # Temporary previews — create/show are public; claim requires auth.
-    resources :temporary_previews, only: %i[create show], param: :token do
+    # Temporary previews — create/show/destroy are public; claim requires auth.
+    resources :temporary_previews, only: %i[create show destroy], param: :token do
       member do
         post :claim
       end

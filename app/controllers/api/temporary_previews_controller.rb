@@ -101,6 +101,19 @@ module Api
       render json: preview_show_json(preview)
     end
 
+    # DELETE /api/temporary_previews/:token
+    # Public. Called by the frontend before creating a new preview so that the
+    # previous URL stops working immediately. Hard-deletes the row regardless of
+    # claimed/expired state — the only goal is making the old URL return 404.
+    def destroy
+      preview = TemporaryPreview.find_by(token: params[:token])
+      if preview
+        preview.delete  # skip callbacks — no blobs to clean up at invalidation time
+        Rails.logger.info "[TEMP_PREVIEW] destroy token=#{params[:token].to_s[0, 8]}… deleted"
+      end
+      head :no_content
+    end
+
     # POST /api/temporary_previews/:token/claim
     # Authenticated. Converts the preview into a real GeoProject owned by current_user.
     # Idempotency: the preview is destroyed after a successful claim; a second call gets 404.
