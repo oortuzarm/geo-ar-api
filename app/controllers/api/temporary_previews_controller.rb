@@ -52,7 +52,18 @@ module Api
         return
       end
 
-      preview = TemporaryPreview.create!(payload: payload)
+      # Upsert: if an active, unclaimed preview already exists for this demo
+      # project, update its payload + extend expiry so the existing QR/URL keeps
+      # working and reflects the current editor state. Otherwise create fresh.
+      demo_project_id = params.dig(:project, :id).to_s.presence
+      preview = find_active_preview_for(demo_project_id)
+
+      if preview
+        preview.update!(payload: payload, expires_at: TemporaryPreview::EXPIRES_IN.from_now)
+        Rails.logger.info "[PREVIEW_CREATE] upsert token=#{preview.token[0, 8]}… demo_project=#{demo_project_id&.[](0, 8)}…"
+      else
+        preview = TemporaryPreview.create!(payload: payload, demo_project_id: demo_project_id)
+      end
 
       t3 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       Rails.logger.info "[PREVIEW_CREATE] done token=#{preview.token[0, 8]}… " \
@@ -383,6 +394,16 @@ module Api
       else
         obj
       end
+    end
+
+    # Returns the single active, unclaimed preview for a given demo project UUID,
+    # or nil if none exists (expired, claimed, or demo_project_id absent/unknown).
+    def find_active_preview_for(demo_project_id)
+      return nil if demo_project_id.blank?
+      TemporaryPreview
+        .where(demo_project_id: demo_project_id, claimed_at: nil)
+        .where("expires_at > ?", Time.current)
+        .first
     end
 
     def resolve_plan(slug)
