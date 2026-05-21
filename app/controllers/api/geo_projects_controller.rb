@@ -112,6 +112,7 @@ module Api
               "longitude"         => pt["longitude"],
               "activation_radius" => pt["activation_radius"],
               "image"             => pt["image"],
+              "images"            => GeoPoint.normalize_images(pt.fetch("images", [])),
               "description"       => pt["description"],
               "instructions"      => pt["instructions"],
               "button_text"       => pt["button_text"],
@@ -127,7 +128,7 @@ module Api
             name lookiar_url content_type content_data
             latitude longitude activation_radius
             description instructions button_text active order
-            availability updated_at
+            availability images updated_at
           ]
 
           pts_with_image    = pts.select { |p| p.key?("image") }
@@ -193,6 +194,7 @@ module Api
           :activation_radius, :image, :description, :instructions,
           :active, :order, :button_text,
           content_data: {},
+          images: [:id, :url, :is_cover, :isCover, :position],
           availability: [
             :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
             :schedule_start_time, :schedule_end_time,

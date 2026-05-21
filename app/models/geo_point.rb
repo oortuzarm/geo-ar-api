@@ -43,8 +43,22 @@ class GeoPoint < ApplicationRecord
   # Normalize incoming images array before storing in JSONB.
   # Accepts ActionController::Parameters arrays and plain arrays.
   def images=(val)
-    normalized = normalize_images(val)
-    super(normalized)
+    super(self.class.normalize_images(val))
+  end
+
+  # Class-level so geo_projects_controller#sync can call it during upsert_all,
+  # which bypasses instance callbacks.
+  def self.normalize_images(val)
+    return [] unless val.is_a?(Array)
+    val.map.with_index do |img, idx|
+      h = img.respond_to?(:to_unsafe_h) ? img.to_unsafe_h.to_h.stringify_keys : img.to_h.stringify_keys
+      {
+        "id"       => h["id"].to_s,
+        "url"      => h["url"].to_s,
+        "is_cover" => h["is_cover"] == true || h["isCover"] == true || h["is_cover"] == "true",
+        "position" => (h["position"] || idx).to_i
+      }
+    end
   end
 
   private
@@ -70,16 +84,4 @@ class GeoPoint < ApplicationRecord
     end.compact
   end
 
-  def normalize_images(val)
-    return [] unless val.is_a?(Array)
-    val.map.with_index do |img, idx|
-      h = img.respond_to?(:to_unsafe_h) ? img.to_unsafe_h.to_h.stringify_keys : img.to_h.stringify_keys
-      {
-        "id"       => h["id"].to_s,
-        "url"      => h["url"].to_s,
-        "is_cover" => h["is_cover"] == true || h["isCover"] == true || h["is_cover"] == "true",
-        "position" => (h["position"] || idx).to_i
-      }
-    end
-  end
 end
