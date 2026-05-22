@@ -66,18 +66,24 @@ module Api
           :public_description,
           :cta_text,
           :cta_url,
-          features: []
+          features: [],
+          features_config: {}
         )
         # yearly_price_computed is intentionally excluded — computed automatically by the model.
         # Explicitly assign features when present so an empty array [] is not dropped by permit.
         permitted[:features] = Array.wrap(params[:features]).map(&:to_s) if params.key?(:features)
-        # features_config: normalize_params already converted featuresConfig → features_config
-        # before this method runs. Must call to_unsafe_h so ActiveRecord stores a plain Hash
-        # in the JSONB column rather than an ActionController::Parameters object.
+        # features_config: normalize_params already converted featuresConfig → features_config.
+        # permit(features_config: {}) only allows scalar nested values, so content_types (array)
+        # would be stripped. Override manually with the full hash via to_unsafe_h.
         if params.key?(:features_config)
-          raw = params[:features_config]
-          permitted[:features_config] = raw.is_a?(ActionController::Parameters) ? raw.to_unsafe_h : raw
-          Rails.logger.info "[PLAN_FEATURES_CONFIG] saving plan features_config: #{permitted[:features_config].inspect}"
+          fc = case params[:features_config]
+               when ActionController::Parameters then params[:features_config].to_unsafe_h
+               when Hash                         then params[:features_config]
+               end
+          if fc
+            permitted[:features_config] = fc
+            Rails.logger.info "[PLAN_FEATURES_CONFIG] saving: #{fc.inspect}"
+          end
         end
         permitted
       end
