@@ -71,8 +71,14 @@ module Api
         # yearly_price_computed is intentionally excluded — computed automatically by the model.
         # Explicitly assign features when present so an empty array [] is not dropped by permit.
         permitted[:features] = Array.wrap(params[:features]).map(&:to_s) if params.key?(:features)
-        # features_config is a JSONB hash — assign directly from raw params to preserve structure.
-        permitted[:features_config] = params[:featuresConfig] if params.key?(:featuresConfig)
+        # features_config: normalize_params already converted featuresConfig → features_config
+        # before this method runs. Must call to_unsafe_h so ActiveRecord stores a plain Hash
+        # in the JSONB column rather than an ActionController::Parameters object.
+        if params.key?(:features_config)
+          raw = params[:features_config]
+          permitted[:features_config] = raw.is_a?(ActionController::Parameters) ? raw.to_unsafe_h : raw
+          Rails.logger.info "[PLAN_FEATURES_CONFIG] saving plan features_config: #{permitted[:features_config].inspect}"
+        end
         permitted
       end
 
