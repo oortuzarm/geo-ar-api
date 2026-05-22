@@ -45,7 +45,7 @@ module Api
       end
 
       def plan_params
-        params.permit(
+        permitted = params.permit(
           :name,
           :slug,
           :monthly_price,
@@ -57,9 +57,16 @@ module Api
           :is_recommended,
           :apply_to_existing_users,
           :sort_order,
-          :is_custom
+          :is_custom,
+          :public_description,
+          :cta_text,
+          :cta_url,
+          features: []
         )
         # yearly_price_computed is intentionally excluded — computed automatically by the model.
+        # Explicitly assign features when present so an empty array [] is not dropped by permit.
+        permitted[:features] = Array.wrap(params[:features]).map(&:to_s) if params.key?(:features)
+        permitted
       end
 
       def plan_json(plan)
@@ -78,6 +85,10 @@ module Api
           applyToExistingUsers: plan.apply_to_existing_users,
           sortOrder:            plan.sort_order,
           isCustom:             plan.is_custom,
+          publicDescription:    plan.public_description,
+          features:             plan.features || [],
+          ctaText:              plan.cta_text,
+          ctaUrl:               plan.cta_url,
           createdAt:            plan.created_at,
           updatedAt:            plan.updated_at
         }

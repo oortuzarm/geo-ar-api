@@ -44,6 +44,10 @@ module Api
         isRecommended:         plan.is_recommended,
         isCustom:              plan.is_custom,
         sortOrder:             plan.sort_order,
+        publicDescription:     plan.public_description,
+        features:              plan.features || [],
+        ctaText:               plan.cta_text,
+        ctaUrl:                plan.cta_url,
       }
     end
   end
