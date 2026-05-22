@@ -48,6 +48,7 @@ module Api
         features:              plan.features || [],
         ctaText:               plan.cta_text,
         ctaUrl:                plan.cta_url,
+        featuresConfig:        plan.effective_features_config,
       }
     end
   end

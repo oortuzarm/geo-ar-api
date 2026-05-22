@@ -3,6 +3,11 @@ module Api
     class PlansController < BaseController
       before_action :set_plan, only: %i[show update destroy]
 
+      # GET /api/admin/plan_feature_registry
+      def feature_registry
+        render json: Plan::FEATURE_REGISTRY
+      end
+
       # GET /api/admin/plans
       def index
         plans = Plan.order(sort_order: :asc, created_at: :asc)
@@ -66,6 +71,8 @@ module Api
         # yearly_price_computed is intentionally excluded — computed automatically by the model.
         # Explicitly assign features when present so an empty array [] is not dropped by permit.
         permitted[:features] = Array.wrap(params[:features]).map(&:to_s) if params.key?(:features)
+        # features_config is a JSONB hash — assign directly from raw params to preserve structure.
+        permitted[:features_config] = params[:featuresConfig] if params.key?(:featuresConfig)
         permitted
       end
 
@@ -89,6 +96,7 @@ module Api
           features:             plan.features || [],
           ctaText:              plan.cta_text,
           ctaUrl:               plan.cta_url,
+          featuresConfig:       plan.effective_features_config,
           createdAt:            plan.created_at,
           updatedAt:            plan.updated_at
         }

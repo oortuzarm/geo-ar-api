@@ -104,6 +104,7 @@ module Api
         effectiveLocationLimit: user.effective_location_limit,
         planName:               user.plan&.name,
         planSlug:               user.plan&.slug,
+        planFeaturesConfig:     user.plan&.effective_features_config,
       }
     end
   end

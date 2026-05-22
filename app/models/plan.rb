@@ -1,6 +1,45 @@
 class Plan < ApplicationRecord
   SLUGGABLE = /\A[a-z0-9_-]+\z/
 
+  FEATURE_REGISTRY = {
+    "content_types" => {
+      type:    "multi_select",
+      options: %w[url video audio file],
+      label:   "Tipos de contenido",
+    },
+    "availability_schedule" => {
+      type:  "boolean",
+      label: "Horario de disponibilidad",
+    },
+    "availability_quota" => {
+      type:  "boolean",
+      label: "Cupo de visitas",
+    },
+    "analytics" => {
+      type:  "boolean",
+      label: "Analíticas",
+    },
+    "members" => {
+      type:  "boolean",
+      label: "Miembros del equipo",
+    },
+  }.freeze
+
+  FULL_FEATURES_CONFIG = {
+    "content_types"         => %w[url video audio file],
+    "availability_schedule" => true,
+    "availability_quota"    => true,
+    "analytics"             => true,
+    "members"               => true,
+  }.freeze
+
+  # Returns features_config falling back to full access when empty (e.g. legacy plans).
+  def effective_features_config
+    return FULL_FEATURES_CONFIG if features_config.blank?
+
+    features_config
+  end
+
   validates :name,  presence: true
   validates :slug,  presence: true, uniqueness: true, format: { with: SLUGGABLE }
   validates :monthly_price,

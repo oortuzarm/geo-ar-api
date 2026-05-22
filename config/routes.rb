@@ -34,6 +34,7 @@ Rails.application.routes.draw do
       get :projects, to: "projects#index"
       get :metrics,  to: "metrics#index"
       resources :plans, only: %i[index show create update destroy]
+      get :plan_feature_registry, to: "plans#feature_registry"
     end
 
     resources :plans, only: %i[index]
