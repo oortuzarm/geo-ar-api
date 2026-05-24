@@ -13,6 +13,7 @@ Rails.application.routes.draw do
           member { post :access }
         end
       end
+      get "settings", to: "settings#index"
     end
 
     resources :geo_projects do
@@ -38,6 +39,8 @@ Rails.application.routes.draw do
       resources :plans, only: %i[index show create update destroy]
       get :plan_feature_registry, to: "plans#feature_registry"
       resources :site_configs, only: %i[update]
+      get   "settings", to: "settings#index"
+      patch "settings", to: "settings#update"
     end
 
     resources :plans, only: %i[index]

@@ -1,5 +1,10 @@
 class SiteConfig < ApplicationRecord
-  ALLOWED_KEYS = %w[register_trial_days].freeze
+  ALLOWED_KEYS = %w[
+    register_trial_days
+    community_map_enabled
+    community_map_disabled_title
+    community_map_disabled_description
+  ].freeze
 
   validates :key,   presence: true, uniqueness: true, inclusion: { in: ALLOWED_KEYS }
   validates :value, presence: true
@@ -13,5 +18,10 @@ class SiteConfig < ApplicationRecord
     record.value = value.to_s
     record.save!
     record
+  end
+
+  # Interprets "true"/"false" string values as booleans.
+  def self.enabled?(key)
+    get(key, default: "false") == "true"
   end
 end
