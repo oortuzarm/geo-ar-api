@@ -171,7 +171,11 @@ module Api
     end
 
     def set_project
-      @project = current_user.geo_projects.find(params[:id])
+      @project = if current_user.role == "admin"
+                   GeoProject.find(params[:id])
+                 else
+                   current_user.geo_projects.find(params[:id])
+                 end
     end
 
     def authorize_project_access!

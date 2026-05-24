@@ -33,13 +33,21 @@ module Api
     private
 
     def set_project
-      @project = current_user.geo_projects.find(params[:geo_project_id])
+      @project = if current_user.role == "admin"
+                   GeoProject.find(params[:geo_project_id])
+                 else
+                   current_user.geo_projects.find(params[:geo_project_id])
+                 end
     end
 
     def set_point
-      @point = GeoPoint.joins(:geo_project)
-                       .where(geo_projects: { user_id: current_user.id })
-                       .find(params[:id])
+      @point = if current_user.role == "admin"
+                 GeoPoint.find(params[:id])
+               else
+                 GeoPoint.joins(:geo_project)
+                         .where(geo_projects: { user_id: current_user.id })
+                         .find(params[:id])
+               end
     end
 
     def authorize_project_access!

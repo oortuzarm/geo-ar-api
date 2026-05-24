@@ -60,8 +60,10 @@ class ApplicationController < ActionController::API
 
   # Blocks location creation when subscription is inactive or the plan limit is reached.
   # Call as a before_action on geo_points#create.
+  # Admins are exempt — they manage on behalf of other users and have no plan of their own.
   def enforce_location_limit!
     user = current_user
+    return if user.role == "admin"
 
     # Subscription must be active (active or in-trial).
     unless user.subscription_active?
