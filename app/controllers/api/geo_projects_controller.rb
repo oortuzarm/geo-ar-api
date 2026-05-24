@@ -182,6 +182,7 @@ module Api
       params.permit(
         :title, :subtitle, :description, :cover_image, :how_to_get, :share_text, :status,
         :public_initial_view_mode, :public_initial_center_lat, :public_initial_center_lng, :public_initial_zoom,
+        :community_enabled,
       )
     end
 

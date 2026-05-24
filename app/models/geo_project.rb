@@ -1,5 +1,6 @@
 class GeoProject < ApplicationRecord
-  STATUSES = %w[draft active inactive].freeze
+  STATUSES           = %w[draft active inactive].freeze
+  COMMUNITY_STATUSES = %w[pending approved rejected hidden].freeze
 
   belongs_to :user, optional: true
 
@@ -8,10 +9,12 @@ class GeoProject < ApplicationRecord
 
   VIEW_MODES = %w[fit_points custom].freeze
 
-  validates :title,  presence: true, length: { maximum: 255 }
-  validates :status, inclusion: { in: STATUSES, message: "debe ser draft, active o inactive" }
+  validates :title,            presence: true, length: { maximum: 255 }
+  validates :status,           inclusion: { in: STATUSES,           message: "debe ser draft, active o inactive" }
+  validates :community_status, inclusion: { in: COMMUNITY_STATUSES, message: "debe ser pending, approved, rejected o hidden" }
 
   before_validation :normalize_view_mode
+  before_save       :reset_community_status_on_enable
 
   scope :publicly_visible, -> { where(status: "active") }
 
@@ -25,6 +28,8 @@ class GeoProject < ApplicationRecord
       howToGet:                how_to_get,
       shareText:               share_text,
       status:                  status,
+      communityEnabled:        community_enabled,
+      communityStatus:         community_status,
       createdAt:               created_at.iso8601(3),
       updatedAt:               updated_at.iso8601(3),
       geoPointIds:             geo_points.pluck(:id),
@@ -43,5 +48,12 @@ class GeoProject < ApplicationRecord
 
   def normalize_view_mode
     self.public_initial_view_mode = "fit_points" if public_initial_view_mode.blank?
+  end
+
+  # When community_enabled transitions false → true, reset community_status to "pending"
+  # so admin re-reviews, UNLESS it was already approved (user toggled off briefly, then back on).
+  def reset_community_status_on_enable
+    return unless community_enabled_changed? && community_enabled?
+    self.community_status = "pending" unless community_status == "approved"
   end
 end

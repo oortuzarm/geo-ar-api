@@ -31,7 +31,9 @@ Rails.application.routes.draw do
       resources :users, only: %i[index destroy] do
         resource :subscription, only: %i[show update], controller: "user_subscriptions"
       end
-      get :projects, to: "projects#index"
+      resources :projects, only: %i[index] do
+        member { patch :community_status, to: "projects#update_community_status" }
+      end
       get :metrics,  to: "metrics#index"
       resources :plans, only: %i[index show create update destroy]
       get :plan_feature_registry, to: "plans#feature_registry"
@@ -40,6 +42,10 @@ Rails.application.routes.draw do
 
     resources :plans, only: %i[index]
     get "site_config", to: "site_config#show"
+
+    namespace :community do
+      get :projects, to: "projects#index"
+    end
 
     get   "account",          to: "account#show"
     patch "account",          to: "account#update"
