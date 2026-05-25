@@ -37,9 +37,11 @@ Rails.application.configure do
   # config.action_cable.url = "wss://example.com/cable"
   # config.action_cable.allowed_request_origins = [ "http://example.com", /http:\/\/example.*/ ]
 
-  # Assume all access to the app is happening through a SSL-terminating reverse proxy.
-  # Can be used together with config.force_ssl for Strict-Transport-Security and secure cookies.
-  # config.assume_ssl = true
+  # Railway (and most PaaS) terminate SSL at the edge and forward plain HTTP to
+  # the container. assume_ssl tells Rails to treat all requests as HTTPS so it
+  # does not issue HTTP→HTTPS redirects internally (which would break health checks
+  # and any other internal HTTP traffic).
+  config.assume_ssl = true
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
   config.force_ssl = true
