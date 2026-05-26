@@ -48,19 +48,31 @@ class User < ApplicationRecord
 
   # A trial is active when:
   #   - status is "trial", AND
-  #   - trial_ends_at is nil (open-ended, no expiry set — treated as active) OR has not passed yet.
-  # This covers admin-created users who are assigned "trial" without an explicit end date.
+  #   - trial_ends_at is nil  →  open-ended (no expiry set), treated as active, OR
+  #   - trial_ends_at is set  →  compare against end_of_day so the selected date is fully inclusive.
+  #     e.g. trial_ends_at = 2026-05-26 00:00:00 UTC → active until 2026-05-26 23:59:59 UTC.
   def trial_active?
-    subscription_status == "trial" &&
-      (trial_ends_at.nil? || Time.current <= trial_ends_at)
+    return false unless subscription_status == "trial"
+    return true  if trial_ends_at.nil?
+
+    deadline = trial_ends_at.in_time_zone.end_of_day
+    now      = Time.zone.now
+    Rails.logger.info "[TRIAL_CHECK] user_id=#{id} now=#{now.iso8601} " \
+                      "trial_ends_at=#{trial_ends_at.iso8601} deadline=#{deadline.iso8601} active=#{deadline >= now}"
+    deadline >= now
   end
 
-  # A trial is considered expired only when an explicit end date was set AND that date has passed.
-  # A nil trial_ends_at is NOT treated as expired — it means open-ended.
+  # Expired only when an explicit end date was set AND the full day has passed.
+  # nil trial_ends_at → open-ended, never expired until explicitly set.
   def trial_expired?
-    subscription_status == "trial" &&
-      trial_ends_at.present? &&
-      Time.current > trial_ends_at
+    return false unless subscription_status == "trial"
+    return false if trial_ends_at.nil?
+
+    deadline = trial_ends_at.in_time_zone.end_of_day
+    now      = Time.zone.now
+    Rails.logger.info "[TRIAL_CHECK] user_id=#{id} now=#{now.iso8601} " \
+                      "trial_ends_at=#{trial_ends_at.iso8601} deadline=#{deadline.iso8601} expired=#{deadline < now}"
+    deadline < now
   end
 
   # True when the user may take billable actions (create content, etc.).
