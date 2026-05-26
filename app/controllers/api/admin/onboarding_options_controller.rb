@@ -39,6 +39,25 @@ module Api
         render json: { error: "Opción no encontrada." }, status: :not_found
       end
 
+      # PATCH /api/admin/onboarding_options/reorder
+      # Body: { ids: [5, 3, 1, 7, 2] }  — ordered array of option IDs for the group.
+      # Sets position 1, 2, 3, … for the provided IDs in the given order.
+      def reorder
+        ids = Array(params[:ids]).map(&:to_i).reject(&:zero?)
+        return render json: { error: "ids is required" }, status: :bad_request if ids.empty?
+
+        ActiveRecord::Base.transaction do
+          ids.each_with_index do |id, index|
+            OnboardingOption.where(id: id).update_all(position: index + 1)
+          end
+        end
+
+        head :ok
+      rescue => e
+        Rails.logger.error("[ONBOARDING_REORDER] #{e.class}: #{e.message}")
+        render json: { error: "Failed to reorder" }, status: :internal_server_error
+      end
+
       private
 
       def option_params

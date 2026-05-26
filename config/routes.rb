@@ -42,7 +42,9 @@ Rails.application.routes.draw do
       get   "settings", to: "settings#index"
       patch "settings", to: "settings#update"
       resources :onboarding_categories, only: %i[index create update destroy]
-      resources :onboarding_options,    only: %i[index create update destroy]
+      resources :onboarding_options,    only: %i[index create update destroy] do
+        collection { patch :reorder }
+      end
     end
 
     get  "onboarding/config", to: "onboarding#index"
