@@ -1,7 +1,7 @@
 module Api
   class TemporaryPreviewsController < ApplicationController
-    # create, show and destroy are public; claim requires authentication.
-    skip_before_action :authenticate_user!, only: %i[create show destroy]
+    # create, show and destroy are public — no authenticate_user! registered for them.
+    # claim is the only action that requires an authenticated session.
     before_action :authenticate_user!, only: %i[claim]
 
     # Temporary previews must never be cached — they change state (claim → 410).
