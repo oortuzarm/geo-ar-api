@@ -17,7 +17,8 @@ module Api
           industries:        distribution_for(:onboarding_industry_id,  OnboardingOption),
           organizationTypes: distribution_for(:onboarding_org_type_id,  OnboardingOption),
           organizationSizes: distribution_for(:onboarding_org_size_id,  OnboardingOption),
-          objectives:        distribution_for(:onboarding_objective_id, OnboardingOption)
+          objectives:        distribution_for(:onboarding_objective_id, OnboardingOption),
+          countries:         country_distribution
         }
       end
 
@@ -25,6 +26,16 @@ module Api
 
       # Groups users by +user_col+, resolves names from +klass+, returns sorted array.
       # Two queries: one GROUP BY on users, one WHERE id IN on the lookup table.
+      def country_distribution
+        User
+          .where("country IS NOT NULL AND TRIM(country) != ''")
+          .group(:country)
+          .order("count_all DESC, country ASC")
+          .limit(10)
+          .count
+          .map { |name, count| { name: name, count: count } }
+      end
+
       def distribution_for(user_col, klass)
         counts = User.where.not(user_col => nil)
                      .group(user_col)
