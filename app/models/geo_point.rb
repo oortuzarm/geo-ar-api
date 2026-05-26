@@ -36,7 +36,8 @@ class GeoPoint < ApplicationRecord
       buttonText:       button_text,
       active:           active,
       order:            order,
-      availability:     camelize_availability(availability)
+      availability:     camelize_availability(availability),
+      createdAt:        created_at.iso8601(3)
     }
   end
 
