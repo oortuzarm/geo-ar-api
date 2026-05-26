@@ -42,6 +42,7 @@ module Api
 
       # POST /api/admin/users
       def create
+        # ── Input guards ──────────────────────────────────────────────────────
         email = params[:email].to_s.downcase.strip
 
         if email.blank?
@@ -54,12 +55,12 @@ module Api
           return
         end
 
-        role   = params[:role].to_s.in?(User::ROLES)                 ? params[:role]                : "user"
-        status = params[:status].to_s.in?(User::STATUSES)            ? params[:status]              : "active"
-        sub    = params[:subscription_status].to_s.in?(User::SUBSCRIPTION_STATUSES) ? params[:subscription_status] : "trial"
+        role          = params[:role].to_s.in?(User::ROLES)                          ? params[:role].to_s                : "user"
+        acct_status   = params[:status].to_s.in?(User::STATUSES)                     ? params[:status].to_s              : "active"
+        sub_status    = params[:subscription_status].to_s.in?(User::SUBSCRIPTION_STATUSES) ? params[:subscription_status].to_s : "trial"
+        password_mode = params[:password_mode].to_s.presence || "auto"
 
-        password_mode = params[:password_mode].to_s
-
+        # ── Password ──────────────────────────────────────────────────────────
         if password_mode == "manual"
           password     = params[:password].to_s
           confirmation = params[:password_confirmation].to_s
@@ -78,59 +79,96 @@ module Api
           confirmation = password
         end
 
-        user = User.new(
+        # ── Build attrs (only core columns — always present) ──────────────────
+        attrs = {
           email:                 email,
           password:              password,
           password_confirmation: confirmation,
           role:                  role,
-          status:                status,
-          subscription_status:   sub,
+          status:                acct_status,
+          subscription_status:   sub_status,
           plan_id:               params[:plan_id].presence,
           trial_ends_at:         params[:trial_ends_at].presence,
           custom_location_limit: params[:custom_location_limit].presence&.to_i,
-          first_name:            params[:first_name].presence,
-          last_name:             params[:last_name].presence,
-          company:               params[:company].presence,
-          job_title:             params[:job_title].presence,
-          country:               params[:country].presence,
-          force_password_change: params[:force_password_change] == true || params[:force_password_change] == "true",
-        )
+        }
+
+        # Profile columns added by migration 20260525000001.
+        # Assign only when the columns actually exist so the controller
+        # stays functional before the migration runs in a given environment.
+        cols = User.column_names
+        if cols.include?("first_name")
+          attrs[:first_name] = params[:first_name].presence
+          attrs[:last_name]  = params[:last_name].presence
+          attrs[:company]    = params[:company].presence
+          attrs[:job_title]  = params[:job_title].presence
+          attrs[:country]    = params[:country].presence
+        end
+        if cols.include?("force_password_change")
+          attrs[:force_password_change] =
+            params[:force_password_change] == true || params[:force_password_change] == "true"
+        end
+
+        Rails.logger.info "[ADMIN_CREATE_USER] admin=#{current_user.id} email=#{email} mode=#{password_mode} " \
+                          "role=#{role} status=#{acct_status} sub=#{sub_status} " \
+                          "profile_cols=#{cols.include?('first_name')}"
+
+        # ── Persist ───────────────────────────────────────────────────────────
+        user = User.new(attrs)
 
         unless user.save
-          render json: { error: user.errors.full_messages.first }, status: :unprocessable_entity
+          msg = user.errors.full_messages.first || "Error de validación."
+          Rails.logger.warn "[ADMIN_CREATE_USER] save failed email=#{email} errors=#{user.errors.full_messages}"
+          render json: { error: msg }, status: :unprocessable_entity
           return
         end
 
-        Rails.logger.info "[ADMIN_CREATE_USER] admin=#{current_user.id} new_user=#{user.id} email=#{user.email} mode=#{password_mode}"
+        Rails.logger.info "[ADMIN_CREATE_USER] created user=#{user.id}"
 
+        # ── Invitation email (auto mode only) ─────────────────────────────────
         if password_mode != "manual"
           begin
             token = PasswordResetToken.generate_for(user)
             PasswordResetMailer.send_invite_email(user: user, token: token)
           rescue => e
-            Rails.logger.error "[ADMIN_CREATE_USER] invite email failed for #{user.id}: #{e.message}"
+            Rails.logger.error "[ADMIN_CREATE_USER] invite email failed user=#{user.id}: #{e.class} #{e.message}"
+            # Non-fatal: user is already created; email failure must not roll back
           end
         end
 
+        # ── Response ──────────────────────────────────────────────────────────
         effective = user.custom_location_limit || user.plan&.location_limit
         render json: {
-          id:                    user.id,
-          email:                 user.email,
-          role:                  user.role,
-          status:                user.status,
-          planId:                user.plan_id,
-          planName:              user.plan&.name,
-          planSlug:              user.plan&.slug,
-          subscriptionStatus:    user.subscription_status,
-          trialStartsAt:         user.trial_starts_at&.iso8601(3),
-          trialEndsAt:           user.trial_ends_at&.iso8601(3),
-          customLocationLimit:   user.custom_location_limit,
+          id:                     user.id,
+          email:                  user.email,
+          role:                   user.role,
+          status:                 user.status,
+          planId:                 user.plan_id,
+          planName:               user.plan&.name,
+          planSlug:               user.plan&.slug,
+          subscriptionStatus:     user.subscription_status,
+          trialStartsAt:          user.trial_starts_at&.iso8601(3),
+          trialEndsAt:            user.trial_ends_at&.iso8601(3),
+          customLocationLimit:    user.custom_location_limit,
           effectiveLocationLimit: effective,
-          projectsCount:         0,
-          pointsCount:           0,
-          createdAt:             user.created_at.iso8601(3),
-          updatedAt:             user.updated_at.iso8601(3),
+          projectsCount:          0,
+          pointsCount:            0,
+          createdAt:              user.created_at.iso8601(3),
+          updatedAt:              user.updated_at.iso8601(3),
         }, status: :created
+
+      rescue ActiveModel::UnknownAttributeError => e
+        Rails.logger.error "[ADMIN_CREATE_USER] UnknownAttributeError — posible migración pendiente: #{e.message}"
+        render json: { error: "Error de configuración interna (atributo desconocido). Revisar migraciones pendientes." },
+               status: :unprocessable_entity
+
+      rescue ActiveRecord::RecordInvalid => e
+        Rails.logger.warn "[ADMIN_CREATE_USER] RecordInvalid: #{e.message}"
+        render json: { error: e.record.errors.full_messages.first || e.message }, status: :unprocessable_entity
+
+      rescue => e
+        Rails.logger.error "[ADMIN_CREATE_USER] #{e.class}: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+        render json: { error: "Error interno al crear el usuario. Revisar logs del servidor." },
+               status: :internal_server_error
       end
 
       # DELETE /api/admin/users/:id
