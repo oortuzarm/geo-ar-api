@@ -45,6 +45,7 @@ Rails.application.routes.draw do
       resources :onboarding_options,    only: %i[index create update destroy] do
         collection { patch :reorder }
       end
+      get "onboarding/metrics", to: "onboarding_metrics#index"
     end
 
     get  "onboarding/config", to: "onboarding#index"
