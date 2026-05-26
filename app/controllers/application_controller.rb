@@ -65,10 +65,24 @@ class ApplicationController < ActionController::API
     user = current_user
     return if user.role == "admin"
 
+    project_id      = defined?(@project) ? @project&.id        : nil
+    project_user_id = defined?(@project) ? @project&.user_id   : nil
+
     # Subscription must be active (active or in-trial).
     unless user.subscription_active?
-      reason = user.trial_expired? ? "Tu período de prueba ha expirado." : "Tu suscripción no está activa."
-      Rails.logger.warn "[LOCATION_LIMIT_BLOCKED] user_id=#{user.id} status=#{user.subscription_status} reason=inactive"
+      if user.trial_expired?
+        reason = "Tu período de prueba ha expirado."
+        block_reason = "trial_expired"
+      else
+        reason = "Tu suscripción no está activa. Contactá al administrador."
+        block_reason = "subscription_inactive status=#{user.subscription_status}"
+      end
+
+      Rails.logger.warn "[LOCATION_LIMIT_BLOCKED] reason=#{block_reason} " \
+                        "user_id=#{user.id} project_id=#{project_id} project_owner_id=#{project_user_id} " \
+                        "role=#{user.role} plan_id=#{user.plan_id} subscription_status=#{user.subscription_status} " \
+                        "trial_ends_at=#{user.trial_ends_at&.iso8601} " \
+                        "custom_location_limit=#{user.custom_location_limit}"
       render json: { error: reason }, status: :forbidden
       throw :abort
     end
@@ -78,7 +92,11 @@ class ApplicationController < ActionController::API
 
     count = user.current_location_count
     if count >= limit
-      Rails.logger.warn "[LOCATION_LIMIT_REACHED] user_id=#{user.id} count=#{count} limit=#{limit}"
+      Rails.logger.warn "[LOCATION_LIMIT_REACHED] user_id=#{user.id} project_id=#{project_id} " \
+                        "project_owner_id=#{project_user_id} role=#{user.role} " \
+                        "plan_id=#{user.plan_id} subscription_status=#{user.subscription_status} " \
+                        "custom_location_limit=#{user.custom_location_limit} " \
+                        "current_points=#{count} allowed_limit=#{limit}"
       render json: {
         error: "Has alcanzado el límite de ubicaciones de tu plan (#{limit}).",
         currentCount: count,

@@ -46,12 +46,17 @@ class User < ApplicationRecord
             .count
   end
 
+  # A trial is active when:
+  #   - status is "trial", AND
+  #   - trial_ends_at is nil (open-ended, no expiry set — treated as active) OR has not passed yet.
+  # This covers admin-created users who are assigned "trial" without an explicit end date.
   def trial_active?
     subscription_status == "trial" &&
-      trial_ends_at.present? &&
-      Time.current <= trial_ends_at
+      (trial_ends_at.nil? || Time.current <= trial_ends_at)
   end
 
+  # A trial is considered expired only when an explicit end date was set AND that date has passed.
+  # A nil trial_ends_at is NOT treated as expired — it means open-ended.
   def trial_expired?
     subscription_status == "trial" &&
       trial_ends_at.present? &&
