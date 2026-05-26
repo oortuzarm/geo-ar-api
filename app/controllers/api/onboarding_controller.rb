@@ -2,15 +2,16 @@ module Api
   class OnboardingController < ApplicationController
     before_action :authenticate_user!
 
+    # GET /api/onboarding/config
     def config
       categories = OnboardingCategory
         .active
         .order(:position)
         .map do |category|
           {
-            id: category.id,
-            name: category.name,
-            slug: category.slug,
+            id:       category.id,
+            name:     category.name,
+            slug:     category.slug,
             iconName: category.icon_name,
             position: category.position
           }
@@ -21,10 +22,10 @@ module Api
         .order(:option_group, :position)
         .map do |option|
           {
-            id: option.id,
-            group: option.option_group,
-            name: option.name,
-            slug: option.slug,
+            id:       option.id,
+            group:    option.option_group,
+            name:     option.name,
+            slug:     option.slug,
             position: option.position
           }
         end
@@ -36,75 +37,65 @@ module Api
     end
 
     # POST /api/onboarding
-    # Saves onboarding state for the current user.
-    # Accepts partial submissions (skippable steps).
+    # normalize_params converts all camelCase request keys to snake_case before this runs.
     def submit
-      cols = User.column_names
       attrs = {}
 
-      # Step 1 — workspace title is saved on the geo_project, not the user.
-      # Company is a user profile field.
-      if cols.include?("company") && params[:company].present?
-        attrs[:company] = params[:company].to_s.strip
-      end
+      attrs[:company] = params[:company].to_s.strip if params[:company].present?
 
-      # Step 2 — category selection
       if params[:category_id].present?
-        category = OnboardingCategory.find_by(id: params[:category_id])
-        if category
-          attrs[:onboarding_category_id] = category.id
-          category.increment!(:usage_count)
+        cat = OnboardingCategory.find_by(id: params[:category_id])
+        if cat
+          attrs[:onboarding_category_id] = cat.id
+          cat.increment!(:usage_count)
         end
       end
 
-      # Step 3 — options
-      %w[industry org_type org_size objective].each do |group|
-        key    = "#{group}_id"
-        col    = "onboarding_#{group}_id"
-        next unless cols.include?(col) && params[key].present?
+      # Map each option group param to its exact users column.
+      {
+        industry:  :onboarding_industry_id,
+        org_type:  :onboarding_org_type_id,
+        org_size:  :onboarding_org_size_id,
+        objective: :onboarding_objective_id
+      }.each do |group, col|
+        param_key = :"#{group}_id"
+        next unless params[param_key].present?
 
-        option = OnboardingOption.active.for_group(group).find_by(id: params[key])
-        if option
-          attrs[col.to_sym] = option.id
-          option.increment!(:usage_count)
-        end
+        option = OnboardingOption
+          .where(option_group: group.to_s, active: true)
+          .find_by(id: params[param_key])
+        next unless option
+
+        attrs[col] = option.id
+        option.increment!(:usage_count)
       end
 
-      # Country (already a string column from profile fields migration)
-      if cols.include?("country") && params[:country].present?
-        attrs[:country] = params[:country].to_s.strip
-      end
+      attrs[:country] = params[:country].to_s.strip if params[:country].present?
 
-      # Mark completed only when explicitly passed
-      if cols.include?("onboarding_completed") && params[:completed] == true
-        attrs[:onboarding_completed] = true
-      end
+      # params[:completed] is a JSON boolean — truthy only when explicitly true.
+      attrs[:onboarding_completed] = true if params[:completed]
 
-      # Step 1 — update workspace title on the most-recent project
       if params[:workspace_title].present?
         project = current_user.geo_projects.order(created_at: :asc).first
-        if project
-          project.update(title: params[:workspace_title].to_s.strip)
-        end
+        project&.update(title: params[:workspace_title].to_s.strip)
       end
 
       current_user.update!(attrs) unless attrs.empty?
 
       render json: {
-        onboardingCompleted: current_user.try(:onboarding_completed) || false,
-        categoryId:          current_user.try(:onboarding_category_id),
-        industryId:          current_user.try(:onboarding_industry_id),
-        orgTypeId:           current_user.try(:onboarding_org_type_id),
-        orgSizeId:           current_user.try(:onboarding_org_size_id),
-        objectiveId:         current_user.try(:onboarding_objective_id),
-        country:             current_user.try(:country)
-      }
-
+        onboardingCompleted: current_user.onboarding_completed,
+        categoryId:          current_user.onboarding_category_id,
+        industryId:          current_user.onboarding_industry_id,
+        orgTypeId:           current_user.onboarding_org_type_id,
+        orgSizeId:           current_user.onboarding_org_size_id,
+        objectiveId:         current_user.onboarding_objective_id,
+        country:             current_user.country
+      }, status: :ok
     rescue ActiveRecord::RecordInvalid => e
       render json: { error: e.record.errors.full_messages.first || e.message }, status: :unprocessable_entity
     rescue => e
-      Rails.logger.error "[ONBOARDING_SUBMIT] #{e.class}: #{e.message}"
-      render json: { error: "Error al guardar el onboarding." }, status: :internal_server_error
+      Rails.logger.error("[ONBOARDING_SUBMIT] #{e.class}: #{e.message}")
+      render json: { error: "Failed to save onboarding" }, status: :unprocessable_entity
     end
   end
 end
