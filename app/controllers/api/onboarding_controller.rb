@@ -16,13 +16,10 @@ module Api
         end
       end
 
-      render json: {
-        categories: categories,
-        options:    options_by_group
-      }
+      render json: { categories: categories, options: options_by_group }
     rescue => e
-      Rails.logger.error "[ONBOARDING_CONFIG] #{e.class}: #{e.message}"
-      render json: { error: "Error al cargar la configuración de onboarding." }, status: :internal_server_error
+      Rails.logger.error "[ONBOARDING_CONFIG] #{e.class}: #{e.message.to_s.first(120)} @ #{e.backtrace&.first}"
+      render json: { error: "Error al cargar la configuración de onboarding." }, status: :internal_server_error unless performed?
     end
 
     # POST /api/onboarding
