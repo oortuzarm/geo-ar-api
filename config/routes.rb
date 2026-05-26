@@ -29,7 +29,7 @@ Rails.application.routes.draw do
     end
 
     namespace :admin do
-      resources :users, only: %i[index destroy] do
+      resources :users, only: %i[index create destroy] do
         resource :subscription, only: %i[show update], controller: "user_subscriptions"
       end
       resources :projects, only: %i[index] do
