@@ -2,24 +2,37 @@ module Api
   class OnboardingController < ApplicationController
     before_action :authenticate_user!
 
-    # GET /api/onboarding/config
-    # Returns all active categories + all active options grouped by type.
-    # Used by the frontend to build the onboarding UI without hardcoded data.
     def config
-      categories = OnboardingCategory.active.ordered.map do |c|
-        { id: c.id, name: c.name, slug: c.slug, description: c.description, iconName: c.icon_name }
-      end
-
-      options_by_group = OnboardingOption::GROUPS.each_with_object({}) do |group, hash|
-        hash[group] = OnboardingOption.active.for_group(group).ordered.map do |o|
-          { id: o.id, name: o.name, slug: o.slug }
+      categories = OnboardingCategory
+        .active
+        .order(:position)
+        .map do |category|
+          {
+            id: category.id,
+            name: category.name,
+            slug: category.slug,
+            iconName: category.icon_name,
+            position: category.position
+          }
         end
-      end
 
-      render json: { categories: categories, options: options_by_group }
+      options = OnboardingOption
+        .active
+        .order(:option_group, :position)
+        .map do |option|
+          {
+            id: option.id,
+            group: option.option_group,
+            name: option.name,
+            slug: option.slug,
+            position: option.position
+          }
+        end
+
+      render json: { categories: categories, options: options }, status: :ok
     rescue => e
-      Rails.logger.error "[ONBOARDING_CONFIG] #{e.class}: #{e.message.to_s.first(120)} @ #{e.backtrace&.first}"
-      render json: { error: "Error al cargar la configuración de onboarding." }, status: :internal_server_error unless performed?
+      Rails.logger.error("[ONBOARDING_CONFIG] #{e.class}: #{e.message}")
+      render json: { categories: [], options: [] }, status: :ok
     end
 
     # POST /api/onboarding
