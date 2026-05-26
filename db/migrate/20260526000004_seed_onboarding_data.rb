@@ -11,11 +11,11 @@ class SeedOnboardingData < ActiveRecord::Migration[7.2]
       { name: "Turismo y gastronomía", slug: "tourism",    icon_name: "🗺️",  position: 1 },
       { name: "Eventos",               slug: "events",    icon_name: "🎪",  position: 2 },
       { name: "Educación",             slug: "education", icon_name: "📚",  position: 3 },
-      { name: "Bienes raíces",         slug: "realestate",icon_name: "🏠",  position: 4 },
+      { name: "Bienes raíces",         slug: "realestate", icon_name: "🏠",  position: 4 },
       { name: "Salud y deportes",      slug: "health",    icon_name: "🏃",  position: 5 },
       { name: "Patrimonio cultural",   slug: "heritage",  icon_name: "🏛️",  position: 6 },
       { name: "Logística",             slug: "logistics", icon_name: "🚚",  position: 7 },
-      { name: "Otro",                  slug: "other",     icon_name: "✦",   position: 8 },
+      { name: "Otro",                  slug: "other",     icon_name: "✦",   position: 8 }
     ]
 
     categories.each do |c|
@@ -68,7 +68,7 @@ class SeedOnboardingData < ActiveRecord::Migration[7.2]
       { option_group: "objective", slug: "education",    name: "Enseñar con recorridos interactivos",       position: 4 },
       { option_group: "objective", slug: "heritage",     name: "Informar sobre patrimonio o cultura",       position: 5 },
       { option_group: "objective", slug: "logistics",    name: "Gestionar logística con geolocalización",   position: 6 },
-      { option_group: "objective", slug: "other",        name: "Otro",                                      position: 7 },
+      { option_group: "objective", slug: "other",        name: "Otro",                                      position: 7 }
     ]
 
     options.each do |o|

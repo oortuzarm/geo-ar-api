@@ -4,7 +4,7 @@ module Api
       COMMUNITY_DEFAULTS = {
         "community_map_disabled_title"       => "Mapa comunitario próximamente",
         "community_map_disabled_description" =>
-          "Estamos preparando esta función para que puedas descubrir experiencias compartidas por categoría.",
+          "Estamos preparando esta función para que puedas descubrir experiencias compartidas por categoría."
       }.freeze
 
       def index
@@ -49,7 +49,7 @@ module Api
           communityMapDisabledTitle:
             SiteConfig.get("community_map_disabled_title",       default: COMMUNITY_DEFAULTS["community_map_disabled_title"]),
           communityMapDisabledDescription:
-            SiteConfig.get("community_map_disabled_description", default: COMMUNITY_DEFAULTS["community_map_disabled_description"]),
+            SiteConfig.get("community_map_disabled_description", default: COMMUNITY_DEFAULTS["community_map_disabled_description"])
         }
       end
     end

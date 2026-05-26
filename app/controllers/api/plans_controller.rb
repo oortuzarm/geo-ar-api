@@ -3,8 +3,8 @@ module Api
     # index is public — landing page (ubyca.com/precios) fetches it without a session.
     # Any future action added here requires auth by default.
     before_action :authenticate_user!
-    skip_before_action :authenticate_user!, only: [:index]
-    before_action :handle_landing_cors, only: [:index]
+    skip_before_action :authenticate_user!, only: [ :index ]
+    before_action :handle_landing_cors, only: [ :index ]
 
     # GET /api/plans
     def index
@@ -48,7 +48,7 @@ module Api
         features:              plan.features || [],
         ctaText:               plan.cta_text,
         ctaUrl:                plan.cta_url,
-        featuresConfig:        plan.effective_features_config,
+        featuresConfig:        plan.effective_features_config
       }
     end
   end

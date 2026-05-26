@@ -76,8 +76,8 @@ module Api
             title:       workspace.title,
             status:      workspace.status,
             pointsCount: ws_count,
-            updatedAt:   workspace.updated_at.iso8601(3),
-          } : nil,
+            updatedAt:   workspace.updated_at.iso8601(3)
+          } : nil
         }
 
       rescue ActiveRecord::RecordNotFound
@@ -133,7 +133,7 @@ module Api
           subscription_status:   sub_status,
           plan_id:               params[:plan_id].presence,
           trial_ends_at:         params[:trial_ends_at].presence,
-          custom_location_limit: params[:custom_location_limit].presence&.to_i,
+          custom_location_limit: params[:custom_location_limit].presence&.to_i
         }
 
         # Profile columns added by migration 20260525000001.
@@ -197,7 +197,7 @@ module Api
           projectsCount:          0,
           pointsCount:            0,
           createdAt:              user.created_at.iso8601(3),
-          updatedAt:              user.updated_at.iso8601(3),
+          updatedAt:              user.updated_at.iso8601(3)
         }, status: :created
 
       rescue ActiveModel::UnknownAttributeError => e

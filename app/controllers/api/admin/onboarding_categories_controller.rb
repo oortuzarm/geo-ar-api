@@ -55,7 +55,7 @@ module Api
           active:      c.active,
           usageCount:  c.usage_count,
           createdAt:   c.created_at.iso8601(3),
-          updatedAt:   c.updated_at.iso8601(3),
+          updatedAt:   c.updated_at.iso8601(3)
         }
       end
     end

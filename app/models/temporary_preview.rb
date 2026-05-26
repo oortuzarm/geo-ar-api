@@ -4,7 +4,7 @@ class TemporaryPreview < ApplicationRecord
   MAX_PAYLOAD_BYTES = 100.kilobytes
 
   validates :token,      presence: true, uniqueness: true
-  validates :payload,    exclusion: { in: [nil], message: "can't be nil" }
+  validates :payload,    exclusion: { in: [ nil ], message: "can't be nil" }
   validates :expires_at, presence: true
 
   before_validation :assign_token,      on: :create

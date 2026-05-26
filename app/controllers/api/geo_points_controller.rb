@@ -35,19 +35,19 @@ module Api
     def set_project
       @project = if current_user.role == "admin"
                    GeoProject.find(params[:geo_project_id])
-                 else
+      else
                    current_user.geo_projects.find(params[:geo_project_id])
-                 end
+      end
     end
 
     def set_point
       @point = if current_user.role == "admin"
                  GeoPoint.find(params[:id])
-               else
+      else
                  GeoPoint.joins(:geo_project)
                          .where(geo_projects: { user_id: current_user.id })
                          .find(params[:id])
-               end
+      end
     end
 
     def authorize_project_access!
@@ -64,7 +64,7 @@ module Api
         :activation_radius, :image, :description,
         :instructions, :active, :order, :button_text,
         content_data: {},
-        images: [:id, :url, :is_cover, :is_Cover, :isCover, :position],
+        images: [ :id, :url, :is_cover, :is_Cover, :isCover, :position ],
         availability: [
           :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
           :schedule_start_time, :schedule_end_time,

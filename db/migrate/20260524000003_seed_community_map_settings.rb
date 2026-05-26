@@ -1,9 +1,9 @@
 class SeedCommunityMapSettings < ActiveRecord::Migration[7.2]
   DEFAULTS = [
-    ["community_map_enabled",             "false"],
-    ["community_map_disabled_title",      "Mapa comunitario próximamente"],
-    ["community_map_disabled_description",
-     "Estamos preparando esta función para que puedas descubrir experiencias compartidas por categoría."],
+    [ "community_map_enabled",             "false" ],
+    [ "community_map_disabled_title",      "Mapa comunitario próximamente" ],
+    [ "community_map_disabled_description",
+     "Estamos preparando esta función para que puedas descubrir experiencias compartidas por categoría." ]
   ].freeze
 
   def up

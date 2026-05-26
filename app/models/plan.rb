@@ -5,24 +5,24 @@ class Plan < ApplicationRecord
     "content_types" => {
       type:    "multi_select",
       options: %w[url video audio file],
-      label:   "Tipos de contenido",
+      label:   "Tipos de contenido"
     },
     "availability_schedule" => {
       type:  "boolean",
-      label: "Horario de disponibilidad",
+      label: "Horario de disponibilidad"
     },
     "availability_quota" => {
       type:  "boolean",
-      label: "Cupo de visitas",
+      label: "Cupo de visitas"
     },
     "analytics" => {
       type:  "boolean",
-      label: "Analíticas",
+      label: "Analíticas"
     },
     "members" => {
       type:  "boolean",
-      label: "Miembros del equipo",
-    },
+      label: "Miembros del equipo"
+    }
   }.freeze
 
   FULL_FEATURES_CONFIG = {
@@ -30,7 +30,7 @@ class Plan < ApplicationRecord
     "availability_schedule" => true,
     "availability_quota"    => true,
     "analytics"             => true,
-    "members"               => true,
+    "members"               => true
   }.freeze
 
   # Returns features_config falling back to full access when empty (e.g. legacy plans).

@@ -4,14 +4,14 @@ STUDIO_ORIGINS = [
   "https://studio.ubyca.com",
   "https://geo-ar-chi.vercel.app",
   "http://localhost:5173",
-  "http://localhost:5174",
+  "http://localhost:5174"
 ].freeze
 
 # Public landing page origins.
 # Credential-free; only exposes the public endpoints the marketing site needs.
 LANDING_ORIGINS = [
   "https://ubyca.com",
-  "https://www.ubyca.com",
+  "https://www.ubyca.com"
 ].freeze
 
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
@@ -57,6 +57,6 @@ Rails.application.config.middleware.use(Class.new do
       Rails.logger.info "[CORS_MW] out origin=#{origin.inspect} path=#{path} acao=#{acao} status=#{status}"
     end
 
-    [status, headers, body]
+    [ status, headers, body ]
   end
 end)

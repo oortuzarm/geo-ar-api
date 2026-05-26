@@ -9,8 +9,8 @@ class AddFeaturesConfigToPlans < ActiveRecord::Migration[7.2]
         "availability_schedule" => false,
         "availability_quota"    => false,
         "analytics"             => false,
-        "members"               => false,
-      },
+        "members"               => false
+      }
       # business, scale, enterprise — full access
     }.freeze
 
@@ -19,7 +19,7 @@ class AddFeaturesConfigToPlans < ActiveRecord::Migration[7.2]
       "availability_schedule" => true,
       "availability_quota"    => true,
       "analytics"             => true,
-      "members"               => true,
+      "members"               => true
     }.freeze
 
     Plan.find_each do |plan|

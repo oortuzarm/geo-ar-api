@@ -10,7 +10,7 @@ module Api
               default: "Mapa comunitario próximamente"),
           communityMapDisabledDescription:
             SiteConfig.get("community_map_disabled_description",
-              default: "Estamos preparando esta función para que puedas descubrir experiencias compartidas por categoría."),
+              default: "Estamos preparando esta función para que puedas descubrir experiencias compartidas por categoría.")
         }
       end
     end

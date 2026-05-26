@@ -84,5 +84,4 @@ class GeoPoint < ApplicationRecord
       }
     end.compact
   end
-
 end

@@ -173,9 +173,9 @@ module Api
     def set_project
       @project = if current_user.role == "admin"
                    GeoProject.find(params[:id])
-                 else
+      else
                    current_user.geo_projects.find(params[:id])
-                 end
+      end
     end
 
     def authorize_project_access!
@@ -199,7 +199,7 @@ module Api
           :activation_radius, :image, :description, :instructions,
           :active, :order, :button_text,
           content_data: {},
-          images: [:id, :url, :is_cover, :isCover, :position],
+          images: [ :id, :url, :is_cover, :isCover, :position ],
           availability: [
             :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
             :schedule_start_time, :schedule_end_time,

@@ -77,9 +77,9 @@ module Api
         # would be stripped. Override manually with the full hash via to_unsafe_h.
         if params.key?(:features_config)
           fc = case params[:features_config]
-               when ActionController::Parameters then params[:features_config].to_unsafe_h
-               when Hash                         then params[:features_config]
-               end
+          when ActionController::Parameters then params[:features_config].to_unsafe_h
+          when Hash                         then params[:features_config]
+          end
           if fc
             permitted[:features_config] = fc
             Rails.logger.info "[PLAN_FEATURES_CONFIG] saving: #{fc.inspect}"

@@ -18,7 +18,7 @@ module Api
 
       render json: {
         categories: categories,
-        options:    options_by_group,
+        options:    options_by_group
       }
     end
 
@@ -84,7 +84,7 @@ module Api
         orgTypeId:           current_user.try(:onboarding_org_type_id),
         orgSizeId:           current_user.try(:onboarding_org_size_id),
         objectiveId:         current_user.try(:onboarding_objective_id),
-        country:             current_user.try(:country),
+        country:             current_user.try(:country)
       }
 
     rescue ActiveRecord::RecordInvalid => e

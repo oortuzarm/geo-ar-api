@@ -29,7 +29,7 @@ module Api
           pointsCount: project.geo_points.size,
           points: active_points.map { |pt|
             { id: pt.id, name: pt.name, latitude: pt.latitude, longitude: pt.longitude }
-          },
+          }
         }
       end
     end

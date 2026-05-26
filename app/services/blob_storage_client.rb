@@ -77,7 +77,7 @@ class BlobStorageClient
     req = Net::HTTP::Delete.new(uri)
     req["Authorization"] = "Bearer #{token}"
     req["Content-Type"]  = "application/json"
-    req.body = JSON.dump({ urls: [url] })
+    req.body = JSON.dump({ urls: [ url ] })
 
     resp = Net::HTTP.start(
       uri.host, uri.port,
