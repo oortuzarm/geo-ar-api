@@ -94,6 +94,7 @@ module Api
     private
 
     def user_json(user)
+      cols = User.column_names
       {
         id:     user.id,
         email:  user.email,
@@ -105,6 +106,7 @@ module Api
         planName:               user.plan&.name,
         planSlug:               user.plan&.slug,
         planFeaturesConfig:     user.plan&.effective_features_config,
+        onboardingCompleted:    cols.include?("onboarding_completed") ? user.onboarding_completed : true,
       }
     end
   end

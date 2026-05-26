@@ -1,6 +1,11 @@
 class User < ApplicationRecord
   has_secure_password
-  belongs_to :plan, optional: true
+  belongs_to :plan,                 optional: true
+  belongs_to :onboarding_category, optional: true, class_name: "OnboardingCategory", foreign_key: :onboarding_category_id
+  belongs_to :onboarding_industry, optional: true, class_name: "OnboardingOption",   foreign_key: :onboarding_industry_id
+  belongs_to :onboarding_org_type, optional: true, class_name: "OnboardingOption",   foreign_key: :onboarding_org_type_id
+  belongs_to :onboarding_org_size, optional: true, class_name: "OnboardingOption",   foreign_key: :onboarding_org_size_id
+  belongs_to :onboarding_objective, optional: true, class_name: "OnboardingOption",  foreign_key: :onboarding_objective_id
 
   has_many :geo_projects,          dependent: :destroy
   has_many :password_reset_tokens, dependent: :destroy

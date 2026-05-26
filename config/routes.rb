@@ -41,7 +41,12 @@ Rails.application.routes.draw do
       resources :site_configs, only: %i[update]
       get   "settings", to: "settings#index"
       patch "settings", to: "settings#update"
+      resources :onboarding_categories, only: %i[index create update destroy]
+      resources :onboarding_options,    only: %i[index create update destroy]
     end
+
+    get  "onboarding/config", to: "onboarding#config"
+    post "onboarding",        to: "onboarding#submit"
 
     resources :plans, only: %i[index]
     get "site_config", to: "site_config#show"
