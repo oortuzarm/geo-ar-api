@@ -20,6 +20,9 @@ module Api
         categories: categories,
         options:    options_by_group
       }
+    rescue => e
+      Rails.logger.error "[ONBOARDING_CONFIG] #{e.class}: #{e.message}"
+      render json: { error: "Error al cargar la configuración de onboarding." }, status: :internal_server_error
     end
 
     # POST /api/onboarding
