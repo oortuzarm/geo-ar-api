@@ -2,6 +2,10 @@ class SeedOnboardingData < ActiveRecord::Migration[7.2]
   def up
     now = Time.current
 
+    if column_exists?(:onboarding_options, :group) && !column_exists?(:onboarding_options, :option_group)
+      rename_column :onboarding_options, :group, :option_group
+    end
+
     # ── Categories (Step 2 — visual cards) ───────────────────────────────────
     categories = [
       { name: "Turismo y gastronomía", slug: "tourism",    icon_name: "🗺️",  position: 1 },
