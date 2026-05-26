@@ -42,13 +42,18 @@ module Api
       private
 
       def option_params
-        params.permit(:group, :name, :slug, :position, :active)
+        # Frontend sends `group`; DB column is `option_group` (reserved word avoidance).
+        # Map the incoming param name to the correct attribute name.
+        permitted = params.permit(:name, :slug, :position, :active)
+        permitted[:option_group] = params[:group] if params[:group].present?
+        permitted
       end
 
+      # JSON always emits `group` so the frontend API contract stays unchanged.
       def serialize(o)
         {
           id:         o.id,
-          group:      o.group,
+          group:      o.option_group,
           name:       o.name,
           slug:       o.slug,
           position:   o.position,
