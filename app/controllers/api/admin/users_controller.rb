@@ -40,6 +40,50 @@ module Api
         }
       end
 
+      # GET /api/admin/users/:id
+      def show
+        user = User.find(params[:id])
+
+        workspace = user.geo_projects.order(updated_at: :desc).first
+        ws_count  = workspace ? GeoPoint.where(geo_project_id: workspace.id).count : 0
+
+        cols = User.column_names
+
+        render json: {
+          id:                    user.id,
+          email:                 user.email,
+          firstName:             cols.include?("first_name") ? user.read_attribute(:first_name) : nil,
+          lastName:              cols.include?("last_name")  ? user.read_attribute(:last_name)  : nil,
+          company:               cols.include?("company")    ? user.read_attribute(:company)    : nil,
+          jobTitle:              cols.include?("job_title")  ? user.read_attribute(:job_title)  : nil,
+          country:               cols.include?("country")    ? user.read_attribute(:country)    : nil,
+          role:                  user.role,
+          status:                user.status,
+          planId:                user.plan_id,
+          planName:              user.plan&.name,
+          subscriptionStatus:    user.subscription_status,
+          trialEndsAt:           user.trial_ends_at&.iso8601(3),
+          customLocationLimit:   user.custom_location_limit,
+          effectiveLocationLimit: user.effective_location_limit,
+          paddleCustomerId:      cols.include?("paddle_customer_id")     ? user.read_attribute(:paddle_customer_id)     : nil,
+          paddleSubscriptionId:  cols.include?("paddle_subscription_id") ? user.read_attribute(:paddle_subscription_id) : nil,
+          projectsCount:         user.geo_projects.count,
+          pointsCount:           GeoPoint.joins(:geo_project).where(geo_projects: { user_id: user.id }).count,
+          createdAt:             user.created_at.iso8601(3),
+          updatedAt:             user.updated_at.iso8601(3),
+          workspace:             workspace ? {
+            id:          workspace.id,
+            title:       workspace.title,
+            status:      workspace.status,
+            pointsCount: ws_count,
+            updatedAt:   workspace.updated_at.iso8601(3),
+          } : nil,
+        }
+
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "Usuario no encontrado." }, status: :not_found
+      end
+
       # POST /api/admin/users
       def create
         # ── Input guards ──────────────────────────────────────────────────────
