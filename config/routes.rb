@@ -45,7 +45,7 @@ Rails.application.routes.draw do
       resources :onboarding_options,    only: %i[index create update destroy]
     end
 
-    get  "onboarding/config", to: "onboarding#config"
+    get  "onboarding/config", to: "onboarding#index"
     post "onboarding",        to: "onboarding#submit"
 
     resources :plans, only: %i[index]

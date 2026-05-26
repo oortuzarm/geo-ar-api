@@ -2,8 +2,7 @@ module Api
   class OnboardingController < ApplicationController
     before_action :authenticate_user!
 
-    # GET /api/onboarding/config
-    def config
+    def index
       categories = OnboardingCategory
         .active
         .order(:position)
