@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_05_26_162102) do
+ActiveRecord::Schema[7.2].define(version: 2026_05_27_002215) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -51,6 +51,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_26_162102) do
     t.string "content_type", default: "url", null: false
     t.jsonb "content_data", default: {}, null: false
     t.jsonb "images"
+    t.boolean "requires_dwell_time", default: false, null: false
+    t.integer "dwell_time_seconds", default: 0, null: false
     t.index ["geo_project_id", "order"], name: "index_geo_points_on_geo_project_id_and_order"
     t.index ["geo_project_id"], name: "index_geo_points_on_geo_project_id"
   end

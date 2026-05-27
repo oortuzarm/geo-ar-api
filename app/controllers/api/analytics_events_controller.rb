@@ -13,15 +13,19 @@ module Api
     # point_click  → NOT deduplicated: every real click creates a new record.
     #
     # After saving, reverse-geocodes lat/lng in a background thread (fire-and-forget).
+    # Event types that are never deduplicated — each occurrence is a distinct record.
+    NON_DEDUPLICATED_TYPES = %w[point_click dwell_cancelled].freeze
+    private_constant :NON_DEDUPLICATED_TYPES
+
     def create
       event_type = params[:event_type]
 
-      if event_type == "point_click"
-        # Every click is a distinct event — no deduplication by session or day.
+      if NON_DEDUPLICATED_TYPES.include?(event_type)
+        # Every occurrence is a distinct event — no deduplication by session or day.
         event = AnalyticsEvent.new(
           geo_project_id: params[:project_id],
           geo_point_id:   params[:point_id],
-          event_type:     "point_click",
+          event_type:     event_type,
           session_id:     params[:session_id],
           event_date:     Date.current,
           latitude:       params[:latitude].presence&.to_f,
@@ -32,7 +36,7 @@ module Api
         render json: { success: true, created: true }, status: :created
 
       else
-        # radius_enter (and any future types): deduplicated per session+day.
+        # radius_enter, dwell_started, dwell_completed (and any future types): deduplicated per session+day.
         attrs = {
           geo_project_id: params[:project_id],
           geo_point_id:   params[:point_id],

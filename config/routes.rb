@@ -10,7 +10,10 @@ Rails.application.routes.draw do
     namespace :public do
       resources :geo_projects, only: %i[show create] do
         resources :geo_points, only: %i[index] do
-          member { post :access }
+          member do
+            post :access
+            post :complete_dwell
+          end
         end
       end
       get "settings", to: "settings#index"

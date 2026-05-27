@@ -2,7 +2,7 @@ module Api
   module Public
     class GeoPointsController < ApplicationController
       before_action :set_project
-      before_action :set_point, only: %i[access]
+      before_action :set_point, only: %i[access complete_dwell]
 
       # GET /api/public/geo_projects/:geo_project_id/geo_points
       # Returns active points without lookiarUrl (URL is protected).
@@ -93,6 +93,39 @@ module Api
           Rails.logger.info "[ACCESS] DENY reason=invalid_content_type ct=#{ct}"
           render_deny("Tipo de contenido no válido")
         end
+      end
+
+      # POST /api/public/geo_projects/:geo_project_id/geo_points/:id/complete_dwell
+      # Body: { latitude: Float, longitude: Float, started_at: Integer (Unix seconds) }
+      # Validates that the user is still inside the area and the required dwell
+      # time has elapsed since started_at. Returns { unlocked: true } on success.
+      def complete_dwell
+        unless @point.requires_dwell_time
+          return render json: { unlocked: false, message: "Este punto no requiere permanencia." },
+                        status: :unprocessable_entity
+        end
+
+        lat = params[:latitude].to_f
+        lng = params[:longitude].to_f
+
+        dist = haversine(lat, lng, @point.latitude, @point.longitude)
+        # Use a generous tolerance (radius + 20m) for the completion check to
+        # avoid false failures from GPS drift at the moment the timer fires.
+        unless dist <= @point.activation_radius + 20
+          return render json: { unlocked: false, message: "Saliste del área antes de completar el tiempo." },
+                        status: :unprocessable_entity
+        end
+
+        started_at = params[:started_at].to_i
+        if started_at > 0
+          elapsed = Time.current.to_i - started_at
+          unless elapsed >= @point.dwell_time_seconds
+            return render json: { unlocked: false, message: "El tiempo de permanencia no se completó." },
+                          status: :unprocessable_entity
+          end
+        end
+
+        render json: { unlocked: true }
       end
 
       private

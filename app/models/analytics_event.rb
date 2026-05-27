@@ -1,5 +1,5 @@
 class AnalyticsEvent < ApplicationRecord
-  EVENT_TYPES = %w[radius_enter point_click].freeze
+  EVENT_TYPES = %w[radius_enter point_click dwell_started dwell_completed dwell_cancelled].freeze
 
   belongs_to :geo_project
   belongs_to :geo_point

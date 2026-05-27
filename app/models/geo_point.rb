@@ -4,11 +4,13 @@ class GeoPoint < ApplicationRecord
   belongs_to :geo_project, inverse_of: :geo_points
   has_many   :analytics_events, dependent: :destroy
 
-  validates :latitude,          presence: true, numericality: { greater_than_or_equal_to: -90,  less_than_or_equal_to: 90 }
-  validates :longitude,         presence: true, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }
-  validates :activation_radius, numericality: { greater_than: 0, only_integer: true }
-  validates :order,             numericality: { greater_than_or_equal_to: 0, only_integer: true }
-  validates :content_type,      inclusion: { in: CONTENT_TYPES }
+  validates :latitude,           presence: true, numericality: { greater_than_or_equal_to: -90,  less_than_or_equal_to: 90 }
+  validates :longitude,          presence: true, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }
+  validates :activation_radius,  numericality: { greater_than: 0, only_integer: true }
+  validates :order,              numericality: { greater_than_or_equal_to: 0, only_integer: true }
+  validates :content_type,       inclusion: { in: CONTENT_TYPES }
+  validates :dwell_time_seconds, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+  validate  :dwell_time_required_when_enabled
 
   # Public variant: excludes content fields so the destination is never
   # exposed in the HTML payload. Content is returned only after server-side
@@ -20,24 +22,26 @@ class GeoPoint < ApplicationRecord
 
   def as_api_json
     {
-      id:               id,
-      geoProjectId:     geo_project_id,
-      name:             name,
-      lookiarUrl:       lookiar_url,
-      contentType:      content_type,
-      contentData:      content_data,
-      latitude:         latitude,
-      longitude:        longitude,
-      activationRadius: activation_radius,
-      image:            image,
-      images:           camelize_images(images),
-      description:      description,
-      instructions:     instructions,
-      buttonText:       button_text,
-      active:           active,
-      order:            order,
-      availability:     camelize_availability(availability),
-      createdAt:        created_at.iso8601(3)
+      id:                 id,
+      geoProjectId:       geo_project_id,
+      name:               name,
+      lookiarUrl:         lookiar_url,
+      contentType:        content_type,
+      contentData:        content_data,
+      latitude:           latitude,
+      longitude:          longitude,
+      activationRadius:   activation_radius,
+      image:              image,
+      images:             camelize_images(images),
+      description:        description,
+      instructions:       instructions,
+      buttonText:         button_text,
+      active:             active,
+      order:              order,
+      availability:       camelize_availability(availability),
+      requiresDwellTime:  requires_dwell_time,
+      dwellTimeSeconds:   dwell_time_seconds,
+      createdAt:          created_at.iso8601(3)
     }
   end
 
@@ -63,6 +67,13 @@ class GeoPoint < ApplicationRecord
   end
 
   private
+
+  def dwell_time_required_when_enabled
+    return unless requires_dwell_time
+    return if dwell_time_seconds.to_i > 0
+
+    errors.add(:dwell_time_seconds, "debe ser mayor a 0 cuando se requiere permanencia")
+  end
 
   # JSONB availability is stored in snake_case (normalize_params converts keys on ingest).
   # Convert back to camelCase so the JS frontend receives keys matching its TypeScript type.

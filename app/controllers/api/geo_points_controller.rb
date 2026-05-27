@@ -6,6 +6,7 @@ module Api
     before_action :enforce_location_limit!,   only: %i[create]
     before_action :set_point,                 only: %i[update destroy]
     before_action :authorize_point_access!,   only: %i[update destroy]
+    before_action :check_dwell_time_feature!, only: %i[create update]
 
     # GET /api/geo-projects/:geo_project_id/geo-points
     def index
@@ -63,14 +64,26 @@ module Api
         :name, :lookiar_url, :content_type, :latitude, :longitude,
         :activation_radius, :image, :description,
         :instructions, :active, :order, :button_text,
+        :requires_dwell_time, :dwell_time_seconds,
         content_data: {},
-        images: [ :id, :url, :is_cover, :is_Cover, :isCover, :position ],
+        images: %i[id url is_cover is_Cover isCover position],
         availability: [
           :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
           :schedule_start_time, :schedule_end_time,
           schedule_days: []
         ],
       )
+    end
+
+    def check_dwell_time_feature!
+      return if current_user.role == "admin"
+      return unless [ true, "true", "1" ].include?(params[:requires_dwell_time])
+
+      config = current_user.plan&.effective_features_config || Plan::FULL_FEATURES_CONFIG
+      return if config["dwell_time"]
+
+      render json: { error: "Tu plan no incluye la función de Permanencia." }, status: :forbidden
+      throw :abort
     end
   end
 end

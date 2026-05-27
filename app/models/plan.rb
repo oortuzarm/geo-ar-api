@@ -22,6 +22,10 @@ class Plan < ApplicationRecord
     "members" => {
       type:  "boolean",
       label: "Miembros del equipo"
+    },
+    "dwell_time" => {
+      type:  "boolean",
+      label: "Permanencia"
     }
   }.freeze
 
@@ -30,7 +34,8 @@ class Plan < ApplicationRecord
     "availability_schedule" => true,
     "availability_quota"    => true,
     "analytics"             => true,
-    "members"               => true
+    "members"               => true,
+    "dwell_time"            => true
   }.freeze
 
   # Returns features_config falling back to full access when empty (e.g. legacy plans).
