@@ -228,21 +228,23 @@ module Api
 
         points_data.each_with_index do |pt, idx|
           project.geo_points.create!(
-            name:              pt["name"].to_s.presence || "Punto #{idx + 1}",
-            lookiar_url:       pt["lookiar_url"].to_s,
-            latitude:          pt["latitude"].to_f,
-            longitude:         pt["longitude"].to_f,
-            activation_radius: (pt["activation_radius"] || 50).to_i,
-            content_type:      pt["content_type"].presence || "url",
-            content_data:      pt["content_data"] || {},
-            image:             pt["image"],
-            images:            pt["images"] || [],
-            description:       pt["description"].to_s,
-            instructions:      pt["instructions"].to_s,
-            button_text:       pt["button_text"].to_s,
-            active:            pt.fetch("active", true),
-            order:             pt["order"] || idx,
-            availability:      pt["availability"] || {}
+            name:                pt["name"].to_s.presence || "Punto #{idx + 1}",
+            lookiar_url:         pt["lookiar_url"].to_s,
+            latitude:            pt["latitude"].to_f,
+            longitude:           pt["longitude"].to_f,
+            activation_radius:   (pt["activation_radius"] || 50).to_i,
+            content_type:        pt["content_type"].presence || "url",
+            content_data:        pt["content_data"] || {},
+            image:               pt["image"],
+            images:              pt["images"] || [],
+            description:         pt["description"].to_s,
+            instructions:        pt["instructions"].to_s,
+            button_text:         pt["button_text"].to_s,
+            active:              pt.fetch("active", true),
+            order:               pt["order"] || idx,
+            availability:        pt["availability"] || {},
+            requires_dwell_time: pt["requires_dwell_time"] == true,
+            dwell_time_seconds:  (pt["dwell_time_seconds"] || 0).to_i
           )
         end
 
@@ -343,24 +345,26 @@ module Api
 
     def extract_point(p)
       {
-        id:                SecureRandom.uuid,
-        name:              p[:name].to_s.strip,
-        latitude:          p[:latitude].to_f,
-        longitude:         p[:longitude].to_f,
-        activation_radius: (p[:activation_radius] || 50).to_i,
-        content_type:      p[:content_type].presence || "url",
+        id:                   SecureRandom.uuid,
+        name:                 p[:name].to_s.strip,
+        latitude:             p[:latitude].to_f,
+        longitude:            p[:longitude].to_f,
+        activation_radius:    (p[:activation_radius] || 50).to_i,
+        content_type:         p[:content_type].presence || "url",
         # safe_hash converts ActionController::Parameters → plain Hash so the
         # JSONB serializer never encounters unpermitted params in the payload.
-        content_data:      safe_hash(p[:content_data]),
-        lookiar_url:       p[:lookiar_url].to_s,
-        image:             p[:image],
-        images:            safe_images(p[:images]),
-        description:       p[:description].to_s,
-        instructions:      p[:instructions].to_s,
-        button_text:       p[:button_text].to_s,
-        active:            p.fetch(:active, true),
-        order:             (p[:order] || 0).to_i,
-        availability:      safe_hash(p[:availability]) || {}
+        content_data:         safe_hash(p[:content_data]),
+        lookiar_url:          p[:lookiar_url].to_s,
+        image:                p[:image],
+        images:               safe_images(p[:images]),
+        description:          p[:description].to_s,
+        instructions:         p[:instructions].to_s,
+        button_text:          p[:button_text].to_s,
+        active:               p.fetch(:active, true),
+        order:                (p[:order] || 0).to_i,
+        availability:         safe_hash(p[:availability]) || {},
+        requires_dwell_time:  [ true, "true", "1" ].include?(p[:requires_dwell_time]),
+        dwell_time_seconds:   (p[:dwell_time_seconds] || 0).to_i
       }
     end
 
