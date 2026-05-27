@@ -35,11 +35,13 @@ module Api
           }
         end
 
+      active_now_count = ranked.sum { |p| p[:activeNow] }
+
       render json: {
-        activeNow:            ranked.sum { |p| p[:activeNow] },
+        activeNow:            active_now_count,
         mostActivePoint:      ranked.first,
         points:               ranked,
-        lastHourDeltaPercent: nil,
+        lastHourDeltaPercent: safe_last_hour_delta(active_now_count),
         peakToday:            safe_peak_today
       }
     end
@@ -49,6 +51,43 @@ module Api
     def set_and_authorize_project!
       @project = GeoProject.find(params[:id])
       authorize_project!(@project)
+    end
+
+    def safe_last_hour_delta(active_now_count)
+      last_hour_delta_percent(active_now_count)
+    rescue => e
+      Rails.logger.error "[LIVE_VISITS] last_hour_delta failed: #{e.class}: #{e.message}"
+      nil
+    end
+
+    # Compares active_now against sessions recorded in the previous hour window.
+    #
+    # active_now    — already-computed count (inside_radius + active window).
+    # previous      — distinct sessions with inside_radius=true whose last_seen_at
+    #                 falls in [1.hour.ago, ACTIVE_WINDOW.ago), i.e. the hour before
+    #                 the current active window. Excluding the active window avoids
+    #                 counting the same sessions in both buckets.
+    #
+    # Formula:
+    #   previous > 0  → ((now - previous) / previous.to_f * 100).round
+    #   previous == 0, now > 0  → 100
+    #   both zero               → 0
+    def last_hour_delta_percent(active_now_count)
+      active_window_cutoff    = GeoPointLiveVisit::ACTIVE_WINDOW.ago
+      previous_window_cutoff  = 1.hour.ago
+
+      previous_count = GeoPointLiveVisit
+                         .where(geo_project_id: @project.id, inside_radius: true)
+                         .where(last_seen_at: previous_window_cutoff...active_window_cutoff)
+                         .count
+
+      if previous_count > 0
+        ((active_now_count - previous_count) / previous_count.to_f * 100).round
+      elsif active_now_count > 0
+        100
+      else
+        0
+      end
     end
 
     # Wraps peak_today so a calculation error never takes down the whole endpoint.
