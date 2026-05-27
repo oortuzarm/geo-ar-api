@@ -40,7 +40,7 @@ module Api
         mostActivePoint:      ranked.first,
         points:               ranked,
         lastHourDeltaPercent: nil,
-        peakToday:            peak_today
+        peakToday:            safe_peak_today
       }
     end
 
@@ -51,26 +51,39 @@ module Api
       authorize_project!(@project)
     end
 
+    # Wraps peak_today so a calculation error never takes down the whole endpoint.
+    def safe_peak_today
+      peak_today
+    rescue => e
+      Rails.logger.error "[LIVE_VISITS] peak_today failed: #{e.class}: #{e.message}"
+      nil
+    end
+
     # Returns the hour block with the most inside-radius sessions today, e.g.:
     #   { label: "18:00–19:00", count: 34 }
-    # Returns nil when there are no records for today.
+    # Returns nil when there are no inside-radius records today.
+    #
+    # Grouping is done in Ruby rather than via DATE_TRUNC so that:
+    #   a) bind parameters inside group() are avoided (not supported by Rails), and
+    #   b) timezone handling uses Time.zone consistently without DB-level tz strings.
+    # Record volume is bounded: geo_point_live_visits is upserted per session per
+    # point, so row counts per project per day remain small even for busy projects.
     def peak_today
       today_start = Time.zone.now.beginning_of_day
       today_end   = Time.zone.now.end_of_day
 
-      # Group by truncated hour using the DB's configured timezone-aware clock.
-      # DATE_TRUNC is PostgreSQL-specific and respects the session timezone.
-      rows = GeoPointLiveVisit
-               .where(geo_project_id: @project.id, inside_radius: true)
-               .where(last_seen_at: today_start..today_end)
-               .group("DATE_TRUNC('hour', last_seen_at AT TIME ZONE 'UTC' AT TIME ZONE ?)", Time.zone.name)
-               .order("DATE_TRUNC('hour', last_seen_at AT TIME ZONE 'UTC' AT TIME ZONE ?) DESC", Time.zone.name)
-               .count
+      timestamps = GeoPointLiveVisit
+                     .where(geo_project_id: @project.id, inside_radius: true)
+                     .where(last_seen_at: today_start..today_end)
+                     .pluck(:last_seen_at)
 
-      return nil if rows.empty?
+      return nil if timestamps.empty?
 
-      peak_time, count = rows.max_by { |_, cnt| cnt }
-      hour_start = peak_time.is_a?(Time) ? peak_time : Time.zone.parse(peak_time.to_s)
+      counts_by_hour = timestamps
+                         .group_by { |ts| ts.in_time_zone(Time.zone).beginning_of_hour }
+                         .transform_values(&:count)
+
+      hour_start, count = counts_by_hour.max_by { |_, cnt| cnt }
 
       {
         label: "#{hour_start.strftime('%H:%M')}–#{(hour_start + 1.hour).strftime('%H:%M')}",
