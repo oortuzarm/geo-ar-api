@@ -38,7 +38,7 @@ module Api
     private
 
     def profile_params
-      params.permit(:first_name, :last_name, :company, :job_title, :country)
+      params.permit(:first_name, :last_name, :company, :job_title, :country, :time_zone)
     end
 
     def account_json(user)
@@ -49,7 +49,8 @@ module Api
         lastName:  user.last_name,
         company:   user.company,
         jobTitle:  user.job_title,
-        country:   user.country
+        country:   user.country,
+        timeZone:  user.time_zone
       }
     end
   end
