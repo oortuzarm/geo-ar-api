@@ -24,12 +24,13 @@ Rails.application.routes.draw do
     resources :geo_projects do
       member do
         patch :sync
-        get :analytics,          to: "analytics_events#stats"
-        get :analytics_by_point, to: "analytics_events#stats_by_point"
-        get :analytics_by_hour,  to: "analytics_events#by_hour"
-        get :analytics_by_day,   to: "analytics_events#by_day"
-        get :analytics_geo,      to: "analytics_events#geo_distribution"
-        get :live_visits,        to: "live_visits#index"
+        get :analytics,               to: "analytics_events#stats"
+        get :analytics_by_point,      to: "analytics_events#stats_by_point"
+        get :analytics_by_hour,       to: "analytics_events#by_hour"
+        get :analytics_by_day,        to: "analytics_events#by_day"
+        get :analytics_geo,           to: "analytics_events#geo_distribution"
+        get :historical_intensity,    to: "analytics_events#historical_intensity"
+        get :live_visits,             to: "live_visits#index"
       end
       resources :geo_points, only: %i[index create]
     end

@@ -1,6 +1,6 @@
 module Api
   class AnalyticsEventsController < ApplicationController
-    ANALYTICS_ACTIONS = %i[stats stats_by_point by_hour by_day geo_distribution].freeze
+    ANALYTICS_ACTIONS = %i[stats stats_by_point by_hour by_day geo_distribution historical_intensity].freeze
 
     before_action :authenticate_user!,         only: ANALYTICS_ACTIONS
     before_action :set_and_authorize_project!, only: ANALYTICS_ACTIONS
@@ -141,6 +141,37 @@ module Api
       data   = counts.map { |day, count| { day: day.to_i, count: count } }
                      .sort_by { |h| h[:day] }
       render json: { data: data }
+    end
+
+    # GET /api/geo_projects/:id/historical_intensity
+    # Returns total radius_enter count per geo_point across all time.
+    # No date filter — the full historical record is included.
+    # Format: { points: [{ pointId, pointName, lat, lng, count }] }
+    def historical_intensity
+      rows = @project.geo_points
+        .select(
+          "geo_points.id",
+          "geo_points.name",
+          "geo_points.latitude",
+          "geo_points.longitude",
+          "COUNT(analytics_events.id) AS entry_count"
+        )
+        .left_joins(:analytics_events)
+        .where("analytics_events.id IS NULL OR analytics_events.event_type = 'radius_enter'")
+        .group("geo_points.id", "geo_points.name", "geo_points.latitude", "geo_points.longitude")
+        .order("geo_points.order")
+
+      render json: {
+        points: rows.map do |row|
+          {
+            pointId:   row.id,
+            pointName: row.name,
+            lat:       row.latitude,
+            lng:       row.longitude,
+            count:     row.entry_count.to_i
+          }
+        end
+      }
     end
 
     # GET /api/geo_projects/:id/analytics_geo[?point_id=UUID]
