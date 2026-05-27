@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_05_27_110000) do
+ActiveRecord::Schema[7.2].define(version: 2026_05_27_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -240,6 +240,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_27_110000) do
     t.integer "onboarding_org_type_id"
     t.integer "onboarding_org_size_id"
     t.integer "onboarding_objective_id"
+    t.string "time_zone", default: "UTC", null: false
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["plan_id"], name: "index_users_on_plan_id"
     t.index ["subscription_status"], name: "index_users_on_subscription_status"

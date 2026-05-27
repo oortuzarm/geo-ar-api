@@ -59,18 +59,28 @@ module Api
       nil
     end
 
+    # Resolves the timezone to use for peak_today calculations.
+    # Priority: owner's saved time_zone → server Time.zone fallback.
+    # ActiveSupport::TimeZone[] returns nil for unknown/invalid names, so any
+    # bad value stored in users.time_zone falls through to the server default.
+    def project_time_zone
+      owner_tz = @project.user&.time_zone.presence
+      ActiveSupport::TimeZone[owner_tz] || Time.zone
+    end
+
     # Returns the hour block with the most inside-radius sessions today, e.g.:
-    #   { label: "18:00–19:00", count: 34 }
-    # Returns nil when there are no inside-radius records today.
+    #   { label: "14:00–15:00", count: 34 }
+    # Returns nil when there are no inside-radius records for today.
     #
-    # Grouping is done in Ruby rather than via DATE_TRUNC so that:
-    #   a) bind parameters inside group() are avoided (not supported by Rails), and
-    #   b) timezone handling uses Time.zone consistently without DB-level tz strings.
-    # Record volume is bounded: geo_point_live_visits is upserted per session per
-    # point, so row counts per project per day remain small even for busy projects.
+    # "Today" and hour labels are expressed in the project owner's timezone.
+    # Grouping is done in Ruby (not DATE_TRUNC) because Rails does not support
+    # bind parameters inside group() clauses.
     def peak_today
-      today_start = Time.zone.now.beginning_of_day
-      today_end   = Time.zone.now.end_of_day
+      tz  = project_time_zone
+      now = Time.current.in_time_zone(tz)
+
+      today_start = now.beginning_of_day
+      today_end   = now.end_of_day
 
       timestamps = GeoPointLiveVisit
                      .where(geo_project_id: @project.id, inside_radius: true)
@@ -80,7 +90,7 @@ module Api
       return nil if timestamps.empty?
 
       counts_by_hour = timestamps
-                         .group_by { |ts| ts.in_time_zone(Time.zone).beginning_of_hour }
+                         .group_by { |ts| ts.in_time_zone(tz).beginning_of_hour }
                          .transform_values(&:count)
 
       hour_start, count = counts_by_hour.max_by { |_, cnt| cnt }
