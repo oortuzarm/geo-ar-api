@@ -1,5 +1,5 @@
 class GeoPointLiveVisit < ApplicationRecord
-  ACTIVE_WINDOW = 2.minutes
+  ACTIVE_WINDOW = 45.seconds
 
   belongs_to :geo_project
   belongs_to :geo_point
