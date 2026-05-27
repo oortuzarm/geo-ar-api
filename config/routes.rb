@@ -16,6 +16,8 @@ Rails.application.routes.draw do
           end
         end
       end
+      # Standalone heartbeat — not nested under geo_projects (no project context needed).
+      post "geo_points/:id/live_visit", to: "live_visits#create"
       get "settings", to: "settings#index"
     end
 
@@ -27,6 +29,7 @@ Rails.application.routes.draw do
         get :analytics_by_hour,  to: "analytics_events#by_hour"
         get :analytics_by_day,   to: "analytics_events#by_day"
         get :analytics_geo,      to: "analytics_events#geo_distribution"
+        get :live_visits,        to: "live_visits#index"
       end
       resources :geo_points, only: %i[index create]
     end

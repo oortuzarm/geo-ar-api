@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_05_27_002215) do
+ActiveRecord::Schema[7.2].define(version: 2026_05_27_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -30,6 +30,23 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_27_002215) do
     t.string "commune"
     t.index ["geo_project_id", "geo_point_id", "event_type", "session_id", "event_date"], name: "idx_analytics_events_radius_enter_uniqueness", unique: true, where: "((event_type)::text = 'radius_enter'::text)"
     t.index ["geo_project_id"], name: "index_analytics_events_on_geo_project_id"
+  end
+
+  create_table "geo_point_live_visits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "geo_project_id", null: false
+    t.uuid "geo_point_id", null: false
+    t.string "session_id", null: false
+    t.float "lat", null: false
+    t.float "lng", null: false
+    t.float "accuracy"
+    t.boolean "inside_radius", default: false, null: false
+    t.datetime "last_seen_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geo_point_id", "session_id"], name: "index_geo_point_live_visits_on_geo_point_id_and_session_id", unique: true
+    t.index ["geo_project_id"], name: "index_geo_point_live_visits_on_geo_project_id"
+    t.index ["inside_radius"], name: "index_geo_point_live_visits_on_inside_radius"
+    t.index ["last_seen_at"], name: "index_geo_point_live_visits_on_last_seen_at"
   end
 
   create_table "geo_points", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -228,6 +245,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_05_27_002215) do
     t.index ["subscription_status"], name: "index_users_on_subscription_status"
   end
 
+  add_foreign_key "geo_point_live_visits", "geo_points"
+  add_foreign_key "geo_point_live_visits", "geo_projects"
   add_foreign_key "geo_points", "geo_projects"
   add_foreign_key "geo_projects", "users"
   add_foreign_key "invitations", "organizations"
