@@ -4,6 +4,7 @@ class SiteConfig < ApplicationRecord
     community_map_enabled
     community_map_disabled_title
     community_map_disabled_description
+    show_community_map_section
   ].freeze
 
   validates :key,   presence: true, uniqueness: true, inclusion: { in: ALLOWED_KEYS }

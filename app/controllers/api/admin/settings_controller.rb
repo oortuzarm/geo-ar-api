@@ -23,6 +23,15 @@ module Api
           end
         end
 
+        if params.key?(:show_community_map_section)
+          raw = params[:show_community_map_section].to_s.downcase.strip
+          if %w[true false].include?(raw)
+            SiteConfig.set("show_community_map_section", raw)
+          else
+            errors[:showCommunityMapSection] = "Debe ser true o false."
+          end
+        end
+
         %w[community_map_disabled_title community_map_disabled_description].each do |key|
           next unless params.key?(key.to_sym)
           val = params[key.to_sym].to_s.strip
@@ -49,7 +58,9 @@ module Api
           communityMapDisabledTitle:
             SiteConfig.get("community_map_disabled_title",       default: COMMUNITY_DEFAULTS["community_map_disabled_title"]),
           communityMapDisabledDescription:
-            SiteConfig.get("community_map_disabled_description", default: COMMUNITY_DEFAULTS["community_map_disabled_description"])
+            SiteConfig.get("community_map_disabled_description", default: COMMUNITY_DEFAULTS["community_map_disabled_description"]),
+          showCommunityMapSection:
+            SiteConfig.get("show_community_map_section", default: "true") == "true"
         }
       end
     end
