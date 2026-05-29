@@ -38,10 +38,11 @@ class User < ApplicationRecord
   # The resolved location cap for this user. Priority:
   #   1. custom_location_limit (set by admin for one-off deals / enterprise)
   #   2. plan.location_limit
-  #   3. nil → unlimited
+  #   3. plan_id nil → 0  (no plan chosen yet — block creation until plan is selected)
   def effective_location_limit
     return custom_location_limit if custom_location_limit.present?
-    plan&.location_limit
+    return plan.location_limit   if plan.present?
+    0
   end
 
   # Current total geo_points owned by this user across all projects.
@@ -51,14 +52,15 @@ class User < ApplicationRecord
             .count
   end
 
-  # A trial is active when:
-  #   - status is "trial", AND
-  #   - trial_ends_at is nil  →  open-ended (no expiry set), treated as active, OR
-  #   - trial_ends_at is set  →  compare against end_of_day so the selected date is fully inclusive.
-  #     e.g. trial_ends_at = 2026-05-26 00:00:00 UTC → active until 2026-05-26 23:59:59 UTC.
+  # A trial is active when ALL of the following hold:
+  #   - subscription_status == "trial"
+  #   - plan_id is present (a plan was selected to start the trial)
+  #   - trial_ends_at is set (nil is NOT treated as open-ended)
+  #   - the end-of-day deadline has not yet passed
   def trial_active?
     return false unless subscription_status == "trial"
-    return true  if trial_ends_at.nil?
+    return false if plan_id.nil?
+    return false if trial_ends_at.nil?
 
     deadline = trial_ends_at.in_time_zone.end_of_day
     now      = Time.zone.now
@@ -67,10 +69,11 @@ class User < ApplicationRecord
     deadline >= now
   end
 
-  # Expired only when an explicit end date was set AND the full day has passed.
-  # nil trial_ends_at → open-ended, never expired until explicitly set.
+  # Expired when an explicit end date was set AND the full day has passed.
+  # Requires plan_id; no plan → not expired, just inactive (plan not chosen yet).
   def trial_expired?
     return false unless subscription_status == "trial"
+    return false if plan_id.nil?
     return false if trial_ends_at.nil?
 
     deadline = trial_ends_at.in_time_zone.end_of_day

@@ -58,7 +58,11 @@ Rails.application.routes.draw do
     get  "onboarding/config", to: "onboarding#index"
     post "onboarding",        to: "onboarding#submit"
 
-    resources :plans, only: %i[index]
+    resources :plans, only: %i[index] do
+      member do
+        post :start_trial
+      end
+    end
     get "site_config", to: "site_config#show"
 
     namespace :community do

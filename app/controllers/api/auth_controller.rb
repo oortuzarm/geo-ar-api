@@ -94,14 +94,22 @@ module Api
     private
 
     def user_json(user)
-      cols = User.column_names
+      cols          = User.column_names
+      trial_active  = user.trial_active?
+      days_left = trial_active && user.trial_ends_at \
+                    ? [ (user.trial_ends_at.to_date - Date.current).to_i, 0 ].max \
+                    : nil
       {
         id:     user.id,
         email:  user.email,
         role:   user.role,
         status: user.status,
+        planId:                 user.plan_id,
         subscriptionStatus:     user.subscription_status,
+        trialStartsAt:          user.trial_starts_at&.iso8601,
         trialEndsAt:            user.trial_ends_at&.iso8601,
+        trialActive:            trial_active,
+        daysRemaining:          days_left,
         effectiveLocationLimit: user.effective_location_limit,
         planName:               user.plan&.name,
         planSlug:               user.plan&.slug,

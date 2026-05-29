@@ -1,7 +1,7 @@
 module Api
   class PlansController < ApplicationController
     # index is public — landing page (ubyca.com/precios) fetches it without a session.
-    # Any future action added here requires auth by default.
+    # start_trial requires an authenticated session (default authenticate_user! applies).
     before_action :authenticate_user!
     skip_before_action :authenticate_user!, only: [ :index ]
     before_action :handle_landing_cors, only: [ :index ]
@@ -11,6 +11,45 @@ module Api
       Rails.logger.info "[PLANS_PUBLIC] index reached without auth"
       plans = Plan.where(is_visible: true).order(sort_order: :asc, created_at: :asc)
       render json: plans.map { |p| plan_json(p) }
+    end
+
+    # POST /api/plans/:id/start_trial
+    # Assigns the plan as a timed trial for the authenticated user.
+    # Validates: plan has trial, user has no plan yet, user hasn't had a prior trial.
+    def start_trial
+      plan = Plan.find(params[:id])
+
+      unless plan.has_trial && plan.trial_days.to_i > 0
+        render json: { error: "Este plan no incluye prueba gratuita." }, status: :unprocessable_entity
+        return
+      end
+
+      if current_user.plan_id.present?
+        render json: { error: "Ya tienes un plan asignado." }, status: :unprocessable_entity
+        return
+      end
+
+      if current_user.trial_starts_at.present?
+        render json: { error: "Ya utilizaste tu prueba gratuita anteriormente." }, status: :unprocessable_entity
+        return
+      end
+
+      now = Time.zone.now
+      current_user.update!(
+        plan_id:             plan.id,
+        subscription_status: "trial",
+        trial_starts_at:     now,
+        trial_ends_at:       now + plan.trial_days.days
+      )
+
+      Rails.logger.info "[START_TRIAL] user_id=#{current_user.id} plan=#{plan.slug} " \
+                        "ends_at=#{current_user.trial_ends_at.iso8601}"
+
+      render json: { success: true }, status: :ok
+    rescue ActiveRecord::RecordNotFound
+      render json: { error: "Plan no encontrado." }, status: :not_found
+    rescue ActiveRecord::RecordInvalid => e
+      render json: { error: e.message }, status: :unprocessable_entity
     end
 
     private
