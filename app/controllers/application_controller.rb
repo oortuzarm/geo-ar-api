@@ -108,23 +108,36 @@ class ApplicationController < ActionController::API
 
   # Convert camelCase keys sent by the JS frontend to snake_case for Rails strong params.
   # e.g. coverImage → cover_image, geoProjectId → geo_project_id
+  #
+  # Depth is capped at NORMALIZE_MAX_DEPTH to prevent stack overflow from
+  # adversarially crafted deeply-nested JSON payloads. Legitimate requests
+  # (including the deepest sync payload) reach at most 5–6 levels.
+  NORMALIZE_MAX_DEPTH = 20
+  private_constant :NORMALIZE_MAX_DEPTH
+
   def normalize_params
-    normalize_hash!(params)
+    normalize_hash!(params, 0)
   end
 
-  def normalize_hash!(hash)
+  def normalize_hash!(hash, depth = 0)
+    if depth >= NORMALIZE_MAX_DEPTH
+      Rails.logger.warn "[NORMALIZE_PARAMS] Depth limit (#{NORMALIZE_MAX_DEPTH}) reached — " \
+                        "dropping further nested params at path depth=#{depth}"
+      return hash
+    end
+
     hash.keys.each do |key|
       new_key = key.to_s.underscore
       value   = hash.delete(key)
-      hash[new_key] = normalize_value(value)
+      hash[new_key] = normalize_value(value, depth + 1)
     end
     hash
   end
 
-  def normalize_value(value)
+  def normalize_value(value, depth = 0)
     case value
-    when ActionController::Parameters then normalize_hash!(value)
-    when Array then value.map { |v| normalize_value(v) }
+    when ActionController::Parameters then normalize_hash!(value, depth)
+    when Array then value.map { |v| normalize_value(v, depth) }
     else value
     end
   end

@@ -11,6 +11,7 @@ class GeoPoint < ApplicationRecord
   validates :content_type,       inclusion: { in: CONTENT_TYPES }
   validates :dwell_time_seconds, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate  :dwell_time_required_when_enabled
+  validate  :content_data_matches_schema
 
   validates :name,         length: { maximum: 255  }, allow_nil: true
   validates :description,  length: { maximum: 2000 }, allow_nil: true
@@ -73,6 +74,63 @@ class GeoPoint < ApplicationRecord
   end
 
   private
+
+  # ── content_data schema validation ────────────────────────────────────────
+  #
+  # Only runs when content_data is non-empty so that legacy points that rely
+  # on the lookiar_url field are never invalidated.
+  #
+  # url type:   { "url" => "https://..." }
+  # media types: { "file_url" => "...", "file_name" => "...", "mime_type" => "..." }
+  VALID_URL_REGEX      = /\Ahttps?:\/\/.+/i.freeze
+  CONTENT_DATA_URL_MAX = 2048
+  FILE_NAME_MAX        = 255
+  MIME_TYPE_MAX        = 127
+  private_constant :VALID_URL_REGEX, :CONTENT_DATA_URL_MAX, :FILE_NAME_MAX, :MIME_TYPE_MAX
+
+  def content_data_matches_schema
+    return if content_type.blank?
+
+    cd = content_data
+    # Empty content_data is allowed — legacy points use lookiar_url instead.
+    return unless cd.is_a?(Hash) && cd.present?
+
+    case content_type
+    when "url"
+      url = cd["url"].to_s
+      if url.blank?
+        errors.add(:content_data, "debe incluir 'url' para tipo url")
+      elsif url.length > CONTENT_DATA_URL_MAX
+        errors.add(:content_data, "'url' no puede superar #{CONTENT_DATA_URL_MAX} caracteres")
+      elsif !VALID_URL_REGEX.match?(url)
+        errors.add(:content_data, "'url' debe comenzar con http:// o https://")
+      end
+    when "video", "audio", "file"
+      file_url  = cd["file_url"].to_s
+      file_name = cd["file_name"].to_s
+      mime_type = cd["mime_type"].to_s
+
+      errors.add(:content_data, "debe incluir 'file_url'")  if file_url.blank?
+      errors.add(:content_data, "debe incluir 'file_name'") if file_name.blank?
+      errors.add(:content_data, "debe incluir 'mime_type'") if mime_type.blank?
+
+      if file_url.present?
+        if file_url.length > CONTENT_DATA_URL_MAX
+          errors.add(:content_data, "'file_url' no puede superar #{CONTENT_DATA_URL_MAX} caracteres")
+        elsif !VALID_URL_REGEX.match?(file_url)
+          errors.add(:content_data, "'file_url' debe comenzar con http:// o https://")
+        end
+      end
+
+      if file_name.length > FILE_NAME_MAX
+        errors.add(:content_data, "'file_name' no puede superar #{FILE_NAME_MAX} caracteres")
+      end
+
+      if mime_type.length > MIME_TYPE_MAX
+        errors.add(:content_data, "'mime_type' no puede superar #{MIME_TYPE_MAX} caracteres")
+      end
+    end
+  end
 
   def dwell_time_required_when_enabled
     return unless requires_dwell_time
