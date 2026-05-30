@@ -9,24 +9,65 @@ module Api
     # Body (camelCase — normalize_params converts to snake_case):
     #   { projectId, pointId, eventType, sessionId, latitude?, longitude? }
     #
+    # Public endpoint (no auth required) — fired by public-facing pages.
+    # Hardened: validates project existence, active status, point ownership,
+    # event_type allowlist, and session_id length to prevent abuse.
+    #
     # radius_enter → deduplicated: 1 record per (session, project, point, day).
     # point_click  → NOT deduplicated: every real click creates a new record.
-    #
-    # After saving, reverse-geocodes lat/lng in a background thread (fire-and-forget).
-    # Event types that are never deduplicated — each occurrence is a distinct record.
     NON_DEDUPLICATED_TYPES = %w[point_click dwell_cancelled].freeze
     private_constant :NON_DEDUPLICATED_TYPES
 
+    # Maximum length for session_id to prevent oversized payloads.
+    SESSION_ID_MAX = 128
+    private_constant :SESSION_ID_MAX
+
     def create
-      event_type = params[:event_type]
+      event_type = params[:event_type].to_s
+      project_id = params[:project_id].to_s
+      point_id   = params[:point_id].presence
+
+      # ── Validate event_type against model allowlist ──────────────────────────
+      unless AnalyticsEvent::EVENT_TYPES.include?(event_type)
+        render json: { error: "Tipo de evento no válido." }, status: :unprocessable_entity
+        return
+      end
+
+      # ── Validate project_id presence ────────────────────────────────────────
+      if project_id.blank?
+        render json: { error: "project_id es obligatorio." }, status: :unprocessable_entity
+        return
+      end
+
+      # ── Load project and verify it is published ──────────────────────────────
+      project = GeoProject.find_by(id: project_id)
+      unless project
+        render json: { error: "Proyecto no encontrado." }, status: :not_found
+        return
+      end
+      unless project.status == "active"
+        render json: { error: "Proyecto no disponible." }, status: :unprocessable_entity
+        return
+      end
+
+      # ── Validate point ownership when point_id is present ───────────────────
+      if point_id.present?
+        unless project.geo_points.exists?(id: point_id)
+          render json: { error: "Punto no encontrado en este proyecto." }, status: :unprocessable_entity
+          return
+        end
+      end
+
+      # ── Sanitize session_id ──────────────────────────────────────────────────
+      session_id = params[:session_id].to_s.slice(0, SESSION_ID_MAX).presence
 
       if NON_DEDUPLICATED_TYPES.include?(event_type)
         # Every occurrence is a distinct event — no deduplication by session or day.
         event = AnalyticsEvent.new(
-          geo_project_id: params[:project_id],
-          geo_point_id:   params[:point_id],
+          geo_project_id: project_id,
+          geo_point_id:   point_id,
           event_type:     event_type,
-          session_id:     params[:session_id],
+          session_id:     session_id,
           event_date:     Date.current,
           latitude:       params[:latitude].presence&.to_f,
           longitude:      params[:longitude].presence&.to_f,
@@ -36,12 +77,12 @@ module Api
         render json: { success: true, created: true }, status: :created
 
       else
-        # radius_enter, dwell_started, dwell_completed (and any future types): deduplicated per session+day.
+        # radius_enter, dwell_started, dwell_completed: deduplicated per session+day.
         attrs = {
-          geo_project_id: params[:project_id],
-          geo_point_id:   params[:point_id],
+          geo_project_id: project_id,
+          geo_point_id:   point_id,
           event_type:     event_type,
-          session_id:     params[:session_id],
+          session_id:     session_id,
           event_date:     Date.current
         }
 
@@ -59,6 +100,9 @@ module Api
         geocode_async(event) if event.latitude && event.longitude
         render json: { success: true, created: true }, status: :created
       end
+    rescue ActiveRecord::RecordInvalid => e
+      render json: { error: e.record.errors.full_messages.first || "Evento inválido." },
+             status: :unprocessable_entity
     end
 
     # GET /api/geo_projects/:id/analytics[?point_id=UUID]

@@ -33,6 +33,13 @@ class User < ApplicationRecord
     numericality: { only_integer: true, greater_than: 0 },
     allow_nil:    true
 
+  validates :first_name, length: { maximum: 100 }, allow_nil: true
+  validates :last_name,  length: { maximum: 100 }, allow_nil: true
+  validates :company,    length: { maximum: 150 }, allow_nil: true
+  validates :job_title,  length: { maximum: 150 }, allow_nil: true
+  validates :country,    length: { maximum: 100 }, allow_nil: true
+  validates :time_zone,  length: { maximum: 100 }, allow_nil: true
+
   # ── Subscription helpers ────────────────────────────────────────────────────
 
   # The resolved location cap for this user. Priority:

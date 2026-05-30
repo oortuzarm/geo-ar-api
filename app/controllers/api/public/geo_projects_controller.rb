@@ -13,18 +13,7 @@ module Api
           return
         end
 
-        render json: project.as_api_json
-      end
-
-      # POST /api/public/geo_projects
-      # Temporal: crea un proyecto demo con datos hardcodeados para testing.
-      def create
-        project = GeoProject.create!(
-          title: "Proyecto Demo",
-          status: "active",
-        )
-
-        render json: project.as_api_json, status: :created
+        render json: project.as_public_api_json
       end
     end
   end

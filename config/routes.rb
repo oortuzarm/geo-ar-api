@@ -8,7 +8,7 @@ Rails.application.routes.draw do
     post   "auth/reset_password",  to: "auth#reset_password"
 
     namespace :public do
-      resources :geo_projects, only: %i[show create] do
+      resources :geo_projects, only: %i[show] do
         resources :geo_points, only: %i[index] do
           member do
             post :access

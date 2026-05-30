@@ -12,6 +12,12 @@ class GeoPoint < ApplicationRecord
   validates :dwell_time_seconds, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate  :dwell_time_required_when_enabled
 
+  validates :name,         length: { maximum: 255  }, allow_nil: true
+  validates :description,  length: { maximum: 2000 }, allow_nil: true
+  validates :instructions, length: { maximum: 500  }, allow_nil: true
+  validates :button_text,  length: { maximum: 100  }, allow_nil: true
+  validates :lookiar_url,  length: { maximum: 2048 }, allow_nil: true
+
   # Public variant: excludes content fields so the destination is never
   # exposed in the HTML payload. Content is returned only after server-side
   # validation via POST .../geo_points/:id/access.

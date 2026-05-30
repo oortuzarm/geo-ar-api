@@ -13,6 +13,12 @@ class GeoProject < ApplicationRecord
   validates :status,           inclusion: { in: STATUSES,           message: "debe ser draft, active o inactive" }
   validates :community_status, inclusion: { in: COMMUNITY_STATUSES, message: "debe ser pending, approved, rejected o hidden" }
 
+  validates :subtitle,     length: { maximum: 255  }, allow_nil: true
+  validates :description,  length: { maximum: 2000 }, allow_nil: true
+  validates :cover_image,  length: { maximum: 2048 }, allow_nil: true
+  validates :how_to_get,   length: { maximum: 1000 }, allow_nil: true
+  validates :share_text,   length: { maximum: 500  }, allow_nil: true
+
   before_validation :normalize_view_mode
   before_save       :reset_community_status_on_enable
 
@@ -42,6 +48,13 @@ class GeoProject < ApplicationRecord
 
   def as_api_json_with_points
     as_api_json.merge(geoPoints: geo_points.map(&:as_api_json))
+  end
+
+  # Public serializer — omits internal/admin-only fields not needed by the
+  # public experience page: communityStatus (admin moderation state),
+  # and createdAt/updatedAt (internal metadata).
+  def as_public_api_json
+    as_api_json.except(:communityStatus, :createdAt, :updatedAt)
   end
 
   private

@@ -45,8 +45,11 @@ class Plan < ApplicationRecord
     features_config
   end
 
-  validates :name,  presence: true
-  validates :slug,  presence: true, uniqueness: true, format: { with: SLUGGABLE }
+  validates :name,               presence: true, length: { maximum: 100  }
+  validates :slug,               presence: true, uniqueness: true, format: { with: SLUGGABLE }, length: { maximum: 100 }
+  validates :public_description, length: { maximum: 1000 }, allow_nil: true
+  validates :cta_text,           length: { maximum: 100  }, allow_nil: true
+  validates :cta_url,            length: { maximum: 2048 }, allow_nil: true
   validates :monthly_price,
     presence: true,
     numericality: { greater_than_or_equal_to: 0 }

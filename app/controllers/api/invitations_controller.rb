@@ -1,5 +1,7 @@
 module Api
   class InvitationsController < ApplicationController
+    include OnboardingPlanAssignment
+
     before_action :authenticate_user!, only: %i[create resend destroy]
     before_action :require_owner!,     only: %i[create resend destroy]
 
@@ -146,6 +148,8 @@ module Api
         return
       end
 
+      plan_attrs = resolve_onboarding_plan_attrs
+
       user = nil
       ActiveRecord::Base.transaction do
         user = User.create!(
@@ -153,7 +157,8 @@ module Api
           password:              password,
           password_confirmation: confirmation,
           role:                  "user",
-          status:                "active"
+          status:                "active",
+          **plan_attrs
         )
         user.memberships.create!(organization: invitation.organization, role: invitation.role)
         invitation.accept!
