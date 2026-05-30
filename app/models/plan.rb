@@ -62,12 +62,20 @@ class Plan < ApplicationRecord
     allow_nil: true
 
   before_save :compute_yearly_price
+  before_save :ensure_single_onboarding_plan
 
   scope :visible, -> { where(is_visible: true) }
   scope :sorted,  -> { order(sort_order: :asc, created_at: :asc) }
   scope :public_plans, -> { visible.sorted }
 
   private
+
+  # When marking a plan as the onboarding plan, deactivate any other plan that
+  # currently holds that flag. Uses update_all to skip callbacks and avoid recursion.
+  def ensure_single_onboarding_plan
+    return unless is_onboarding_plan && will_save_change_to_is_onboarding_plan?
+    Plan.where.not(id: id).where(is_onboarding_plan: true).update_all(is_onboarding_plan: false)
+  end
 
   # yearly_price_computed is derived — never set it manually.
   # Formula: (monthly_price * 12) * (1 - annual_discount_percent / 100)

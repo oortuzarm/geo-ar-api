@@ -81,6 +81,7 @@ module Api
         hasTrial:              plan.has_trial,
         trialDays:             plan.trial_days,
         isRecommended:         plan.is_recommended,
+        isOnboardingPlan:      plan.is_onboarding_plan,
         isCustom:              plan.is_custom,
         sortOrder:             plan.sort_order,
         publicDescription:     plan.public_description,
