@@ -1,5 +1,6 @@
 class GeoPoint < ApplicationRecord
-  CONTENT_TYPES = %w[url video audio file].freeze
+  CONTENT_TYPES    = %w[url video audio file].freeze
+  ACTIVATION_MODES = %w[radius polygon].freeze
 
   belongs_to :geo_project, inverse_of: :geo_points
   has_many   :analytics_events, dependent: :destroy
