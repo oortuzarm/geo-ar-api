@@ -244,7 +244,9 @@ module Api
             order:               pt["order"] || idx,
             availability:        pt["availability"] || {},
             requires_dwell_time: pt["requires_dwell_time"] == true,
-            dwell_time_seconds:  (pt["dwell_time_seconds"] || 0).to_i
+            dwell_time_seconds:  (pt["dwell_time_seconds"] || 0).to_i,
+            activation_mode:     pt["activation_mode"].presence || "radius",
+            activation_polygon:  pt["activation_polygon"]
           )
         end
 
@@ -364,7 +366,9 @@ module Api
         order:                (p[:order] || 0).to_i,
         availability:         safe_hash(p[:availability]) || {},
         requires_dwell_time:  [ true, "true", "1" ].include?(p[:requires_dwell_time]),
-        dwell_time_seconds:   (p[:dwell_time_seconds] || 0).to_i
+        dwell_time_seconds:   (p[:dwell_time_seconds] || 0).to_i,
+        activation_mode:      p[:activation_mode].presence || "radius",
+        activation_polygon:   safe_hash(p[:activation_polygon])
       }
     end
 

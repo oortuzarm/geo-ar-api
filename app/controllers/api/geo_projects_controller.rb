@@ -116,17 +116,19 @@ module Api
               "description"       => pt["description"],
               "instructions"      => pt["instructions"],
               "button_text"       => pt["button_text"],
-              "active"            => pt.fetch("active", true),
-              "order"             => pt.fetch("order", 0),
-              "availability"      => pt.fetch("availability", {}),
-              "created_at"        => now,
-              "updated_at"        => now
+              "active"               => pt.fetch("active", true),
+              "order"                => pt.fetch("order", 0),
+              "availability"         => pt.fetch("availability", {}),
+              "activation_mode"      => pt.fetch("activation_mode", "radius").presence || "radius",
+              "activation_polygon"   => pt.fetch("activation_polygon", nil),
+              "created_at"           => now,
+              "updated_at"           => now
             }
           end
 
           base_columns = %w[
             name lookiar_url content_type content_data
-            latitude longitude activation_radius
+            latitude longitude activation_radius activation_mode activation_polygon
             description instructions button_text active order
             availability images updated_at
           ]
@@ -196,9 +198,10 @@ module Api
         :public_initial_view_mode, :public_initial_center_lat, :public_initial_center_lng, :public_initial_zoom,
         geo_points: [
           :id, :name, :lookiar_url, :content_type, :latitude, :longitude,
-          :activation_radius, :image, :description, :instructions,
+          :activation_radius, :activation_mode, :image, :description, :instructions,
           :active, :order, :button_text,
-          content_data: {},
+          content_data:       {},
+          activation_polygon: {},
           images: [ :id, :url, :is_cover, :isCover, :position ],
           availability: [
             :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,

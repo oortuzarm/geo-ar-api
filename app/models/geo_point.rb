@@ -9,7 +9,12 @@ class GeoPoint < ApplicationRecord
   validates :longitude,          presence: true, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }
   validates :activation_radius,  numericality: { greater_than: 0, only_integer: true }
   validates :order,              numericality: { greater_than_or_equal_to: 0, only_integer: true }
-  validates :content_type,       inclusion: { in: CONTENT_TYPES }
+  validates :content_type,    inclusion: { in: CONTENT_TYPES }
+  validates :activation_mode, inclusion: { in: ACTIVATION_MODES }
+  validates :activation_polygon, presence: true, if: -> { activation_mode == "polygon" }
+  validate  :activation_polygon_is_valid_geojson,
+            if: -> { activation_mode == "polygon" && activation_polygon.present? }
+
   validates :dwell_time_seconds, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate  :dwell_time_required_when_enabled
   validate  :content_data_matches_schema
@@ -46,10 +51,12 @@ class GeoPoint < ApplicationRecord
       buttonText:         button_text,
       active:             active,
       order:              order,
-      availability:       camelize_availability(availability),
-      requiresDwellTime:  requires_dwell_time,
-      dwellTimeSeconds:   dwell_time_seconds,
-      createdAt:          created_at.iso8601(3)
+      availability:        camelize_availability(availability),
+      requiresDwellTime:   requires_dwell_time,
+      dwellTimeSeconds:    dwell_time_seconds,
+      activationMode:      activation_mode,
+      activationPolygon:   activation_polygon,
+      createdAt:           created_at.iso8601(3)
     }
   end
 
@@ -130,6 +137,16 @@ class GeoPoint < ApplicationRecord
       if mime_type.length > MIME_TYPE_MAX
         errors.add(:content_data, "'mime_type' no puede superar #{MIME_TYPE_MAX} caracteres")
       end
+    end
+  end
+
+  def activation_polygon_is_valid_geojson
+    geom = activation_polygon
+    unless geom.is_a?(Hash) &&
+           geom["type"] == "Feature" &&
+           geom.dig("geometry", "type").in?(%w[Polygon MultiPolygon]) &&
+           geom.dig("geometry", "coordinates").is_a?(Array)
+      errors.add(:activation_polygon, "debe ser un GeoJSON Feature válido con geometría Polygon o MultiPolygon")
     end
   end
 
