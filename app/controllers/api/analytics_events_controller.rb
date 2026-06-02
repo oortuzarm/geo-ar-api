@@ -1,5 +1,7 @@
 module Api
   class AnalyticsEventsController < ApplicationController
+    include AnalyticsQueryable
+
     ANALYTICS_ACTIONS = %i[stats stats_by_point by_hour by_day geo_distribution historical_intensity].freeze
 
     before_action :authenticate_user!,         only: ANALYTICS_ACTIONS
@@ -236,42 +238,6 @@ module Api
     def set_and_authorize_project!
       @project = GeoProject.find(params[:id])
       authorize_project!(@project)
-    end
-
-    # Returns analytics_events scoped to the project, optionally filtered by
-    # a single geo_point when ?point_id= is present in the query string.
-    # Validates that the requested point belongs to this project to prevent data leaks.
-    def point_scoped_events
-      scope = @project.analytics_events
-
-      if params[:point_id].present?
-        Rails.logger.info "[ANALYTICS_POINT_FILTER] action=#{action_name} " \
-                          "project_id=#{@project.id} point_id=#{params[:point_id]}"
-
-        unless @project.geo_points.exists?(id: params[:point_id])
-          render json: { error: "El punto no pertenece a este proyecto." }, status: :not_found
-          throw :abort
-        end
-
-        scope = scope.where(geo_point_id: params[:point_id])
-        Rails.logger.info "[ANALYTICS_POINT_FILTER_APPLIED] geo_point_id=#{params[:point_id]}"
-      end
-
-      scope
-    end
-
-    # Aggregates a text column into [{label, count, pct}], sorted by count desc.
-    # Excludes NULL and blank values.
-    def geo_buckets(scope, column)
-      rows  = scope.where.not(column => [ nil, "" ])
-                   .group(column)
-                   .order("count_all DESC")
-                   .count
-      total = rows.values.sum
-      rows.map do |label, count|
-        pct = total > 0 ? (count.to_f / total * 100).round : 0
-        { label: label, count: count, pct: pct }
-      end
     end
 
     # Spawns a fire-and-forget thread to reverse-geocode and update the event.

@@ -6,6 +6,12 @@ Rails.application.routes.draw do
 
       resources :projects, only: %i[index show] do
         resources :locations, only: %i[index], shallow: false
+        member do
+          get :analytics,                  to: "analytics#summary"
+          get "analytics/locations",       to: "analytics#locations",    as: :analytics_locations
+          get "analytics/distribution",    to: "analytics#distribution", as: :analytics_distribution
+          get "analytics/intensity",       to: "analytics#intensity",    as: :analytics_intensity
+        end
       end
 
       resources :locations, only: %i[show]

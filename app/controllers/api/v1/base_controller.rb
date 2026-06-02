@@ -4,27 +4,36 @@ module Api
       before_action :authenticate_api_credential!
 
       # ── Error handlers ────────────────────────────────────────────────────────
+      # Rails rescue_from uses reverse-declaration order: the LAST defined handler
+      # for a given exception class takes priority.  Define the catch-all
+      # StandardError FIRST so that more-specific handlers (defined later) always
+      # win for their respective exception types.
 
-      rescue_from UncaughtThrowError do |e|
-        raise e unless e.tag == :abort
-        head :internal_server_error unless performed?
-      end
-
-      rescue_from ActiveRecord::RecordNotFound do
-        render_error :not_found, "Resource not found"
-      end
-
-      rescue_from ActionController::ParameterMissing do |e|
-        render_error :bad_request, e.message
+      rescue_from StandardError do |e|
+        Rails.logger.error "[API_V1] Unhandled error: #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+        render_error :internal_server_error, "Internal server error"
       end
 
       rescue_from ActiveRecord::RecordInvalid do |e|
         render_error :unprocessable_entity, "Validation failed", details: e.record.errors.as_json
       end
 
-      rescue_from StandardError do |e|
-        Rails.logger.error "[API_V1] Unhandled error: #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
-        render_error :internal_server_error, "Internal server error"
+      rescue_from ActionController::ParameterMissing do |e|
+        render_error :bad_request, e.message
+      end
+
+      rescue_from ActiveRecord::RecordNotFound do
+        render_error :not_found, "Resource not found"
+      end
+
+      # Catches throw(:abort) that escapes from within an action (not a before_action).
+      # before_action aborts are caught by Rails' callback catch(:abort) and never
+      # reach here.  For aborts inside action methods (e.g. analytics_point_not_found!),
+      # the throw becomes UncaughtThrowError and must be silenced if a render already
+      # occurred.
+      rescue_from UncaughtThrowError do |e|
+        raise e unless e.tag == :abort
+        head :internal_server_error unless performed?
       end
 
       private
@@ -44,7 +53,7 @@ module Api
 
         if credential.nil?
           render_error :unauthorized, "Invalid or missing API credentials"
-          return
+          throw :abort
         end
 
         @current_credential = credential
