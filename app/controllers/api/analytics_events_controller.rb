@@ -128,19 +128,23 @@ module Api
       }
     end
 
-    # GET /api/geo_projects/:id/analytics_by_point
+    # GET /api/geo_projects/:id/analytics_by_point[?from=YYYY-MM-DD&to=YYYY-MM-DD]
     # Single query: LEFT JOIN + conditional COUNT FILTER — no N+1.
     # Includes points with 0 events so the frontend always gets a complete list.
     # Conversion uses distinct session counts so it is always 0–100%.
+    # Date filter is applied inside the FILTER clauses so the LEFT JOIN keeps
+    # points with zero matching events (not filtered out by a WHERE clause).
     def stats_by_point
+      dsql = date_filter_sql_fragment
+
       rows = @project.geo_points
         .select(
           "geo_points.id",
           "geo_points.name",
-          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'radius_enter') AS radius_entries",
-          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'point_click') AS clicks",
-          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'radius_enter') AS unique_enterers",
-          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'point_click') AS unique_clickers",
+          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'radius_enter'#{dsql}) AS radius_entries",
+          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'point_click'#{dsql}) AS clicks",
+          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'radius_enter'#{dsql}) AS unique_enterers",
+          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'point_click'#{dsql}) AS unique_clickers",
         )
         .left_joins(:analytics_events)
         .group("geo_points.id", "geo_points.name")

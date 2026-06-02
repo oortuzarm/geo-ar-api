@@ -56,20 +56,23 @@ module Api
         })
       end
 
-      # GET /api/v1/projects/:id/analytics/locations
+      # GET /api/v1/projects/:id/analytics/locations[?from=YYYY-MM-DD&to=YYYY-MM-DD]
       #
       # Returns per-location breakdown of analytics + current active sessions.
       # Identical query to Api::AnalyticsEventsController#stats_by_point plus
       # a live-visits count layer from GeoPointLiveVisit.
+      # Date filter applied inside FILTER clauses to preserve zero-event rows.
       def locations
+        dsql = date_filter_sql_fragment
+
         rows = @project.geo_points
           .select(
             "geo_points.id",
             "geo_points.name",
-            "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'radius_enter') AS radius_entries",
-            "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'point_click') AS clicks",
-            "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'radius_enter') AS unique_enterers",
-            "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'point_click') AS unique_clickers"
+            "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'radius_enter'#{dsql}) AS radius_entries",
+            "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'point_click'#{dsql}) AS clicks",
+            "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'radius_enter'#{dsql}) AS unique_enterers",
+            "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'point_click'#{dsql}) AS unique_clickers"
           )
           .left_joins(:analytics_events)
           .group("geo_points.id", "geo_points.name")
