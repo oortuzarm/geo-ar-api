@@ -41,6 +41,27 @@ class Rack::Attack
     client_ip(req) if req.post? && req.path == "/api/invitations"
   end
 
+  # ── API v1 throttles ─────────────────────────────────────────────────────────
+
+  # General IP throttle for /api/v1/* — 300 req/min broad protection
+  throttle("api/v1/ip", limit: 300, period: 1.minute) do |req|
+    client_ip(req) if req.path.start_with?("/api/v1/")
+  end
+
+  # Per-credential throttle — 120 req/min default
+  # The credential key is extracted from Basic auth header (key_public portion).
+  throttle("api/v1/credential", limit: 120, period: 1.minute) do |req|
+    next unless req.path.start_with?("/api/v1/") && !req.path.end_with?("/health")
+
+    auth = req.get_header("HTTP_AUTHORIZATION").to_s
+    if auth.start_with?("Basic ")
+      decoded = Base64.strict_decode64(auth.delete_prefix("Basic ")).to_s rescue ""
+      decoded.split(":", 2).first.presence
+    elsif auth.start_with?("Bearer ")
+      auth.delete_prefix("Bearer ").split(":", 2).first.presence
+    end
+  end
+
   # ── Throttle response ─────────────────────────────────────────────────────────
   # Returns JSON instead of the default plain-text body so the frontend can
   # parse the error message consistently.

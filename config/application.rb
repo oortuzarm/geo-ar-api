@@ -41,6 +41,12 @@ module GeoArApi
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
 
+    # Background jobs via GoodJob (PostgreSQL-backed, no Redis required).
+    config.active_job.queue_adapter = :good_job
+    config.good_job.execution_mode = :async
+    config.good_job.max_threads = 5
+    config.good_job.poll_interval = 30
+
     # Re-add cookies and session middleware (stripped by api_only).
     # same_site: :lax works for same-registered-domain subdomains (studio. / api.ubyca.com).
     config.middleware.use ActionDispatch::Cookies

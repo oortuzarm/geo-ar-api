@@ -1,4 +1,18 @@
 Rails.application.routes.draw do
+  # ── Ubyca API v1 ────────────────────────────────────────────────────────────
+  namespace :api do
+    namespace :v1 do
+      get "health", to: "health#index"
+
+      resources :projects, only: %i[index show] do
+        resources :locations, only: %i[index], shallow: false
+      end
+
+      resources :locations, only: %i[show]
+    end
+  end
+
+  # ── Existing API (Studio / Public) ───────────────────────────────────────────
   namespace :api do
     post   "auth/register",        to: "auth#register"
     post   "auth/login",           to: "auth#login"
