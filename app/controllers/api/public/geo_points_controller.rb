@@ -5,54 +5,52 @@ module Api
       before_action :set_point, only: %i[access complete_dwell]
 
       # GET /api/public/geo_projects/:geo_project_id/geo_points
-      # Returns active points without lookiarUrl (URL is protected).
       def index
         points = @project.geo_points.where(active: true).order(:order)
         render json: points.map(&:as_public_api_json)
       end
 
       # POST /api/public/geo_projects/:geo_project_id/geo_points/:id/access
-      # Body: { latitude: Float, longitude: Float }
-      # Validates location + schedule + quota, then returns the destination URL.
+      # Body: { latitude:, longitude:, local_day?: "Lun", local_time?: "09:30" }
       def access
         lat = params[:latitude].to_f
         lng = params[:longitude].to_f
 
         Rails.logger.info "[ACCESS] ── START ──────────────────────────────────────"
         Rails.logger.info "[ACCESS] project_id=#{@project.id} point_id=#{@point.id}"
-        Rails.logger.info "[ACCESS] raw params: lat_raw=#{params[:latitude].inspect} lng_raw=#{params[:longitude].inspect}"
-        Rails.logger.info "[ACCESS] user   lat=#{lat} lng=#{lng}"
-        Rails.logger.info "[ACCESS] point  lat=#{@point.latitude} lng=#{@point.longitude}"
-        Rails.logger.info "[ACCESS] radius=#{@point.activation_radius}m"
-        Rails.logger.info "[ACCESS] availability=#{@point.availability.inspect}"
+        Rails.logger.info "[ACCESS] user lat=#{lat} lng=#{lng} mode=#{@point.activation_mode}"
+        Rails.logger.info "[ACCESS] radius=#{@point.activation_radius}m availability=#{@point.availability.inspect}"
 
-        dist = haversine(lat, lng, @point.latitude, @point.longitude)
-        within = dist <= @point.activation_radius
+        dist   = GeoEngine.distance_to(@point, lat, lng)
+        within = GeoEngine.inside_boundary?(@point, lat, lng)
 
-        Rails.logger.info "[ACCESS] distance=#{dist.round(2)}m within_radius=#{within}"
+        Rails.logger.info "[ACCESS] distance=#{dist.round(2)}m within_boundary=#{within}"
 
         unless within
-          Rails.logger.info "[ACCESS] DENY reason=distance dist=#{dist.round(2)}m > radius=#{@point.activation_radius}m"
+          Rails.logger.info "[ACCESS] DENY reason=boundary dist=#{dist.round(2)}m mode=#{@point.activation_mode}"
           return render_deny("Debes estar dentro del área para acceder")
         end
 
-        sched_ok = schedule_ok?
+        sched_ok = GeoEngine.schedule_active?(
+          @point,
+          local_day:  params[:local_day].presence,
+          local_time: params[:local_time].presence
+        )
         Rails.logger.info "[ACCESS] schedule_ok=#{sched_ok}"
 
         unless sched_ok
-          Rails.logger.info "[ACCESS] DENY reason=schedule availability=#{@point.availability.inspect}"
+          Rails.logger.info "[ACCESS] DENY reason=schedule"
           return render_deny("Esta experiencia está fuera del horario disponible")
         end
 
-        if quota_active?
-          av    = @point.availability || {}
+        if GeoEngine.quota_active?(@point)
+          av = @point.availability || {}
           Rails.logger.info "[ACCESS] quota active limit=#{av["quota_limit"]} used=#{av["quota_used"]}"
-          msg = try_decrement_quota
-          if msg
-            Rails.logger.info "[ACCESS] DENY reason=quota msg=#{msg}"
-            return render_deny(msg)
+          unless GeoEngine.consume_quota!(@point)
+            Rails.logger.info "[ACCESS] DENY reason=quota exhausted"
+            return render_deny("No quedan cupos disponibles")
           end
-          Rails.logger.info "[ACCESS] quota decremented ok"
+          Rails.logger.info "[ACCESS] quota consumed ok"
         else
           Rails.logger.info "[ACCESS] quota not active — skipping"
         end
@@ -60,27 +58,23 @@ module Api
         ct = @point.content_type.presence || "url"
         cd = @point.content_data.presence || {}
 
-        Rails.logger.info "[ACCESS] content_type=#{ct} content_data_keys=#{cd.keys.inspect}"
+        Rails.logger.info "[ACCESS] content_type=#{ct}"
 
         case ct
         when "url"
           target_url = cd["url"].presence || @point.lookiar_url.presence
-          Rails.logger.info "[ACCESS] target_url=#{target_url.inspect}"
           unless target_url
-            Rails.logger.info "[ACCESS] DENY reason=empty_url point_id=#{@point.id}"
-            return render json: { success: false, message: "No se encontró una URL válida para esta experiencia" }, status: :unprocessable_entity
+            return render json: { success: false, message: "No se encontró una URL válida para esta experiencia" },
+                          status: :unprocessable_entity
           end
-          Rails.logger.info "[ACCESS] success url=#{target_url}"
           render json: { success: true, content_type: "url", url: target_url }
 
         when "video", "audio", "file"
           file_url = cd["file_url"].presence
-          Rails.logger.info "[ACCESS] file_url=#{file_url.inspect}"
           unless file_url
-            Rails.logger.info "[ACCESS] DENY reason=empty_file_url point_id=#{@point.id}"
-            return render json: { success: false, message: "No se encontró un archivo para esta experiencia" }, status: :unprocessable_entity
+            return render json: { success: false, message: "No se encontró un archivo para esta experiencia" },
+                          status: :unprocessable_entity
           end
-          Rails.logger.info "[ACCESS] success file=#{cd["file_name"].inspect}"
           render json: {
             success:      true,
             content_type: ct,
@@ -90,27 +84,23 @@ module Api
           }
 
         else
-          Rails.logger.info "[ACCESS] DENY reason=invalid_content_type ct=#{ct}"
           render_deny("Tipo de contenido no válido")
         end
       end
 
       # POST /api/public/geo_projects/:geo_project_id/geo_points/:id/complete_dwell
-      # Body: { latitude: Float, longitude: Float, started_at: Integer (Unix seconds) }
-      # Validates that the user is still inside the area and the required dwell
-      # time has elapsed since started_at. Returns { unlocked: true } on success.
+      # Body: { latitude:, longitude:, started_at: Integer (Unix seconds) }
       def complete_dwell
         unless @point.requires_dwell_time
           return render json: { unlocked: false, message: "Este punto no requiere permanencia." },
                         status: :unprocessable_entity
         end
 
-        lat = params[:latitude].to_f
-        lng = params[:longitude].to_f
+        lat  = params[:latitude].to_f
+        lng  = params[:longitude].to_f
+        dist = GeoEngine.distance_to(@point, lat, lng)
 
-        dist = haversine(lat, lng, @point.latitude, @point.longitude)
-        # Use a generous tolerance (radius + 20m) for the completion check to
-        # avoid false failures from GPS drift at the moment the timer fires.
+        # Generous tolerance (+20 m) for GPS drift at timer completion.
         unless dist <= @point.activation_radius + 20
           return render json: { unlocked: false, message: "Saliste del área antes de completar el tiempo." },
                         status: :unprocessable_entity
@@ -133,7 +123,6 @@ module Api
       def set_project
         @project = GeoProject.find(params[:geo_project_id])
         unless @project.status == "active"
-          Rails.logger.info "[ACCESS] DENY reason=project_not_published project_id=#{@project.id} status=#{@project.status}"
           render json: { message: "Proyecto no publicado" }, status: :forbidden
         end
       end
@@ -141,114 +130,12 @@ module Api
       def set_point
         @point = @project.geo_points.find_by(id: params[:id], active: true)
         unless @point
-          Rails.logger.info "[ACCESS] DENY reason=point_not_found point_id=#{params[:id]} project_id=#{@project.id}"
           render json: { message: "Punto no encontrado" }, status: :not_found
         end
       end
 
       def render_deny(message)
-        Rails.logger.info "[ACCESS] ── RESPONSE deny message=#{message.inspect}"
         render json: { success: false, message: }, status: :unprocessable_entity
-      end
-
-      # ── Haversine ──────────────────────────────────────────────────────────────
-
-      def haversine(lat1, lng1, lat2, lng2)
-        r    = 6_371_000.0
-        phi1 = lat1 * Math::PI / 180
-        phi2 = lat2 * Math::PI / 180
-        dphi = (lat2 - lat1) * Math::PI / 180
-        dlam = (lng2 - lng1) * Math::PI / 180
-        a    = Math.sin(dphi / 2)**2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dlam / 2)**2
-        2 * r * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-      end
-
-      # ── Schedule ───────────────────────────────────────────────────────────────
-
-      # Schedule validation uses the client's local time when provided.
-      #
-      # The frontend sends localTime (HH:MM) and localDay (e.g. "Lun") in the
-      # request body so that schedule checks use the browser's local clock —
-      # identical to what computePointAvailability() uses in availability.ts.
-      # Without this, a Rails server running in UTC would silently diverge from
-      # a user whose device is in a different timezone (e.g. UTC-3 Argentina).
-      #
-      # Fallback: if the client doesn't send localTime/localDay (older app
-      # versions), the server falls back to Time.current. In that case,
-      # schedule validation may be inaccurate for users outside the server's
-      # configured timezone — this is documented here rather than silently wrong.
-      def schedule_ok?
-        av = @point.availability || {}
-        return true unless av["schedule_enabled"]
-
-        days = av["schedule_days"] || []
-
-        # Prefer the client's local day; fall back to server day.
-        today = if valid_local_day?(params[:local_day])
-          params[:local_day]
-        else
-          week_days = %w[Dom Lun Mar Mié Jue Vie Sáb]
-          week_days[Time.current.wday]
-        end
-
-        return false if days.any? && !days.include?(today)
-
-        st = av["schedule_start_time"]
-        et = av["schedule_end_time"]
-        if st && et
-          # Prefer the client's local time; fall back to server time.
-          cur = if valid_local_time?(params[:local_time])
-            params[:local_time]
-          else
-            Time.current.strftime("%H:%M")
-          end
-
-          Rails.logger.info "[ACCESS] schedule cur=#{cur} st=#{st} et=#{et} source=#{params[:local_time].present? ? "client" : "server"}"
-
-          # Open window is [start, end) — exclusive end time.
-          # At exactly et the experience is considered closed.
-          return false if cur < st || cur >= et
-        end
-
-        true
-      end
-
-      # HH:MM format guard — prevents unvalidated client strings from being
-      # used in comparisons. Does not verify the time is logically valid
-      # (e.g. 25:99 would pass), but that's irrelevant for a string comparison.
-      def valid_local_time?(value)
-        value.is_a?(String) && value.match?(/\A\d{2}:\d{2}\z/)
-      end
-
-      def valid_local_day?(value)
-        %w[Dom Lun Mar Mié Jue Vie Sáb].include?(value)
-      end
-
-      # ── Quota ──────────────────────────────────────────────────────────────────
-
-      def quota_active?
-        av = @point.availability || {}
-        av["quota_enabled"] && av["quota_limit"].present?
-      end
-
-      # Atomically decrements quota_used. Returns an error message string on
-      # failure (exhausted), or nil on success.
-      def try_decrement_quota
-        error = nil
-        GeoPoint.transaction do
-          @point.lock!
-          @point.reload
-          av    = @point.availability || {}
-          limit = av["quota_limit"].to_i
-          used  = av["quota_used"].to_i
-          if used >= limit
-            error = "No quedan cupos disponibles"
-            raise ActiveRecord::Rollback
-          end
-          av["quota_used"] = used + 1
-          @point.update_column(:availability, av)
-        end
-        error
       end
     end
   end

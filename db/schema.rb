@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_02_140000) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_02_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -28,8 +28,15 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_02_140000) do
     t.string "country"
     t.string "city"
     t.string "commune"
+    t.string "source"
+    t.uuid "api_credential_id"
+    t.string "user_ref"
+    t.jsonb "context_metadata"
+    t.string "failure_reason"
+    t.index ["api_credential_id"], name: "index_analytics_events_on_api_credential_id"
     t.index ["geo_project_id", "geo_point_id", "event_type", "session_id", "event_date"], name: "idx_analytics_events_radius_enter_uniqueness", unique: true, where: "((event_type)::text = 'radius_enter'::text)"
     t.index ["geo_project_id"], name: "index_analytics_events_on_geo_project_id"
+    t.index ["source"], name: "index_analytics_events_on_source"
   end
 
   create_table "api_credentials", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -220,6 +227,20 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_02_140000) do
     t.index ["scheduled_at"], name: "index_good_jobs_on_scheduled_at", where: "(finished_at IS NULL)"
   end
 
+  create_table "idempotency_keys", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "api_credential_id", null: false
+    t.string "idempotency_key", null: false
+    t.string "endpoint", null: false
+    t.integer "response_status"
+    t.text "response_body"
+    t.datetime "expires_at", null: false
+    t.datetime "locked_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["api_credential_id", "idempotency_key"], name: "idx_idempotency_keys_on_credential_and_key", unique: true
+    t.index ["expires_at"], name: "index_idempotency_keys_on_expires_at"
+  end
+
   create_table "invitations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "organization_id", null: false
     t.uuid "invited_by_id", null: false
@@ -371,6 +392,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_02_140000) do
     t.index ["subscription_status"], name: "index_users_on_subscription_status"
   end
 
+  add_foreign_key "analytics_events", "api_credentials"
   add_foreign_key "api_credentials", "organizations"
   add_foreign_key "api_credentials", "users", column: "created_by_user_id"
   add_foreign_key "api_credentials", "users", column: "revoked_by_user_id"
@@ -378,6 +400,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_02_140000) do
   add_foreign_key "geo_point_live_visits", "geo_projects"
   add_foreign_key "geo_points", "geo_projects"
   add_foreign_key "geo_projects", "users"
+  add_foreign_key "idempotency_keys", "api_credentials"
   add_foreign_key "invitations", "organizations"
   add_foreign_key "invitations", "users", column: "invited_by_id"
   add_foreign_key "memberships", "organizations"

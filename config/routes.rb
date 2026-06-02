@@ -9,6 +9,11 @@ Rails.application.routes.draw do
       end
 
       resources :locations, only: %i[show]
+
+      namespace :presence do
+        post :validate
+        post :check
+      end
     end
   end
 

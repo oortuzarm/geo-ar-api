@@ -5,6 +5,11 @@ module Api
 
       # ── Error handlers ────────────────────────────────────────────────────────
 
+      rescue_from UncaughtThrowError do |e|
+        raise e unless e.tag == :abort
+        head :internal_server_error unless performed?
+      end
+
       rescue_from ActiveRecord::RecordNotFound do
         render_error :not_found, "Resource not found"
       end
@@ -78,6 +83,16 @@ module Api
         end
       end
 
+      # ── Scope enforcement ─────────────────────────────────────────────────────
+
+      # Renders 403 and aborts if the current credential lacks the required scope.
+      def require_scope!(scope)
+        return if current_credential.scopes.include?(scope)
+
+        render json: { error: "insufficient_scope", required: scope }, status: :forbidden
+        throw :abort
+      end
+
       # ── Response helpers ──────────────────────────────────────────────────────
 
       def render_error(status, message, details: nil)
@@ -92,9 +107,46 @@ module Api
         render json: body, status: :ok
       end
 
+      # ── Idempotency ───────────────────────────────────────────────────────────
+
+      # Returns the Idempotency-Key header value, or nil if absent.
+      def idempotency_key_header
+        request.headers["Idempotency-Key"].presence
+      end
+
+      # Looks up an existing idempotency record for the current request.
+      # Returns the record if found, nil otherwise.
+      def find_idempotency_record(key)
+        return nil if key.blank?
+        IdempotencyKey.active.find_by(
+          api_credential_id: current_credential.id,
+          idempotency_key:   key
+        )
+      end
+
+      # Creates a locked idempotency record, claiming the slot.
+      # Handles the race-condition case where two requests arrive simultaneously.
+      # Returns the record on success, nil if another request already claimed it.
+      def create_idempotency_lock(key, endpoint:)
+        IdempotencyKey.create!(
+          api_credential_id: current_credential.id,
+          idempotency_key:   key,
+          endpoint:          endpoint,
+          expires_at:        IdempotencyKey::TTL.from_now,
+          locked_at:         Time.current
+        )
+      rescue ActiveRecord::RecordNotUnique
+        nil
+      end
+
+      # Stores the computed response on an idempotency record.
+      def finalize_idempotency(record, status:, body:)
+        return unless record
+        record.update_columns(response_status: status, response_body: body.to_json)
+      end
+
       # ── Scoping helpers ───────────────────────────────────────────────────────
 
-      # Projects visible to the current credential's organization.
       def organization_projects
         GeoProject.where(
           user_id: current_organization.memberships.select(:user_id)
