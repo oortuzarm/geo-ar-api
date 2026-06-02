@@ -102,12 +102,13 @@ module Api
         unless pts.empty?
           build_record = lambda do |pt|
             {
-              "id"                => pt["id"].presence || SecureRandom.uuid,
-              "geo_project_id"    => @project.id,
-              "name"              => pt["name"],
-              "lookiar_url"       => pt["lookiar_url"].to_s,
-              "content_type"      => pt.fetch("content_type", "url").presence || "url",
-              "content_data"      => pt.fetch("content_data", {}) || {},
+              "id"                   => pt["id"].presence || SecureRandom.uuid,
+              "geo_project_id"       => @project.id,
+              "name"                 => pt["name"],
+              "lookiar_url"          => pt["lookiar_url"].to_s,
+              "content_type"         => pt.fetch("content_type", "url").presence || "url",
+              "content_data"         => pt.fetch("content_data", {}) || {},
+              "destination_category" => pt["destination_category"].presence,
               "latitude"          => pt["latitude"],
               "longitude"         => pt["longitude"],
               "activation_radius" => pt["activation_radius"],
@@ -127,7 +128,7 @@ module Api
           end
 
           base_columns = %w[
-            name lookiar_url content_type content_data
+            name lookiar_url content_type content_data destination_category
             latitude longitude activation_radius activation_mode activation_polygon
             description instructions button_text active order
             availability images updated_at
@@ -197,9 +198,9 @@ module Api
         :title, :subtitle, :description, :cover_image, :how_to_get, :share_text,
         :public_initial_view_mode, :public_initial_center_lat, :public_initial_center_lng, :public_initial_zoom,
         geo_points: [
-          :id, :name, :lookiar_url, :content_type, :latitude, :longitude,
-          :activation_radius, :activation_mode, :image, :description, :instructions,
-          :active, :order, :button_text,
+          :id, :name, :lookiar_url, :content_type, :destination_category,
+          :latitude, :longitude, :activation_radius, :activation_mode,
+          :image, :description, :instructions, :active, :order, :button_text,
           content_data:       {},
           activation_polygon: {},
           images: [ :id, :url, :is_cover, :isCover, :position ],

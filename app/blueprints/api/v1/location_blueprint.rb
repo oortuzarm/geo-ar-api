@@ -55,6 +55,12 @@ module Api
         resolve_destination(location)
       end
 
+      # Populated only for URL-type locations; nil for video/audio/file.
+      # Values: website | whatsapp | form | reservation | ecommerce | social | map | coupon | custom
+      field :destinationCategory do |location|
+        location.content_type == "url" ? location.destination_category.presence : nil
+      end
+
       field :createdAt do |location|
         location.created_at.iso8601(3)
       end

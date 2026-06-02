@@ -61,9 +61,9 @@ module Api
 
     def point_params
       params.permit(
-        :name, :lookiar_url, :content_type, :latitude, :longitude,
-        :activation_radius, :activation_mode, :image, :description,
-        :instructions, :active, :order, :button_text,
+        :name, :lookiar_url, :content_type, :destination_category,
+        :latitude, :longitude, :activation_radius, :activation_mode,
+        :image, :description, :instructions, :active, :order, :button_text,
         :requires_dwell_time, :dwell_time_seconds,
         content_data:        {},
         activation_polygon:  {},

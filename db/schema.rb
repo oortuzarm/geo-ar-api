@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_02_170000) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_03_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -100,6 +100,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_02_170000) do
     t.integer "dwell_time_seconds", default: 0, null: false
     t.string "activation_mode", default: "radius", null: false
     t.jsonb "activation_polygon"
+    t.string "destination_category"
     t.index ["activation_mode"], name: "index_geo_points_on_activation_mode"
     t.index ["geo_project_id", "order"], name: "index_geo_points_on_geo_project_id_and_order"
     t.index ["geo_project_id"], name: "index_geo_points_on_geo_project_id"

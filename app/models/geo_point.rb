@@ -1,6 +1,7 @@
 class GeoPoint < ApplicationRecord
-  CONTENT_TYPES    = %w[url video audio file].freeze
-  ACTIVATION_MODES = %w[radius polygon].freeze
+  CONTENT_TYPES         = %w[url video audio file].freeze
+  ACTIVATION_MODES      = %w[radius polygon].freeze
+  DESTINATION_CATEGORIES = %w[website whatsapp form reservation ecommerce social map coupon custom].freeze
 
   belongs_to :geo_project, inverse_of: :geo_points
   has_many   :analytics_events,      dependent: :destroy
@@ -10,8 +11,10 @@ class GeoPoint < ApplicationRecord
   validates :longitude,          presence: true, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }
   validates :activation_radius,  numericality: { greater_than: 0, only_integer: true }
   validates :order,              numericality: { greater_than_or_equal_to: 0, only_integer: true }
-  validates :content_type,    inclusion: { in: CONTENT_TYPES }
-  validates :activation_mode, inclusion: { in: ACTIVATION_MODES }
+  validates :content_type,          inclusion: { in: CONTENT_TYPES }
+  validates :activation_mode,       inclusion: { in: ACTIVATION_MODES }
+  validates :destination_category,  inclusion: { in: DESTINATION_CATEGORIES },
+                                    allow_nil: true, allow_blank: true
   validates :activation_polygon, presence: true, if: -> { activation_mode == "polygon" }
   validate  :activation_polygon_is_valid_geojson,
             if: -> { activation_mode == "polygon" && activation_polygon.present? }
@@ -29,7 +32,8 @@ class GeoPoint < ApplicationRecord
   # Public variant: excludes content fields so the destination is never
   # exposed in the HTML payload. Content is returned only after server-side
   # validation via POST .../geo_points/:id/access.
-  # contentType IS included so the frontend can show the right icon/button.
+  # contentType and destinationCategory ARE included so the frontend can
+  # show the right icon/button and categorisation label.
   def as_public_api_json
     as_api_json.except(:lookiarUrl, :contentData)
   end
@@ -40,8 +44,9 @@ class GeoPoint < ApplicationRecord
       geoProjectId:       geo_project_id,
       name:               name,
       lookiarUrl:         lookiar_url,
-      contentType:        content_type,
-      contentData:        content_data,
+      contentType:          content_type,
+      contentData:          content_data,
+      destinationCategory:  destination_category.presence,
       latitude:           latitude,
       longitude:          longitude,
       activationRadius:   activation_radius,
