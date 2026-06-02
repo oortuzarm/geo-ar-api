@@ -1,13 +1,15 @@
 module Api
   class ApiCredentialsController < ApplicationController
     before_action :authenticate_user!
-    before_action :set_credential!, only: %i[update regenerate_secret]
+    before_action :set_credential!, only: %i[update regenerate_secret destroy]
 
     # GET /api/api_credentials
-    # Returns all credentials for the current user's organization.
+    # Returns credentials for the current user's organization, excluding soft-deleted ones.
     # Never includes secret or digest fields.
     def index
-      credentials = current_organization.api_credentials.order(created_at: :desc)
+      credentials = current_organization.api_credentials
+                      .where.not(status: "deleted")
+                      .order(created_at: :desc)
       render json: credentials.map { |c| credential_json(c) }
     end
 
@@ -97,10 +99,25 @@ module Api
       render json: { id: @credential.id, secret: new_secret }
     end
 
+    # DELETE /api/api_credentials/:id
+    # Soft-deletes the credential by setting status to "deleted".
+    # Hard destroy is unsafe: analytics_events and idempotency_keys both reference
+    # api_credentials via FK constraints with ON DELETE RESTRICT.
+    # After this call the credential stops authenticating immediately (active? = false)
+    # and disappears from the index.
+    def destroy
+      @credential.update!(status: "deleted")
+      head :no_content
+    end
+
     private
 
+    # Scopes the lookup to non-deleted credentials so a deleted credential returns 404
+    # (rather than allowing update/regenerate on a logically removed record).
     def set_credential!
-      @credential = current_organization.api_credentials.find(params[:id])
+      @credential = current_organization.api_credentials
+                      .where.not(status: "deleted")
+                      .find(params[:id])
     end
 
     # Serializes a credential for API responses.

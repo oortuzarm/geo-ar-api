@@ -1,5 +1,5 @@
 class ApiCredential < ApplicationRecord
-  STATUSES = %w[active revoked suspended expired].freeze
+  STATUSES = %w[active revoked suspended expired deleted].freeze
 
   VALID_SCOPES = %w[
     projects:read

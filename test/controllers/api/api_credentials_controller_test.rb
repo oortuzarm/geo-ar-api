@@ -220,6 +220,69 @@ class Api::ApiCredentialsControllerTest < ActionDispatch::IntegrationTest
     refute response.parsed_body.key?("secret")
   end
 
+  # ── DELETE /api/api_credentials/:id (destroy) ────────────────────────────────
+
+  test "destroy: returns 401 when not logged in" do
+    cred = build_credential
+    delete "/api/auth/logout"
+    delete "/api/api_credentials/#{cred.id}"
+    assert_response :unauthorized
+  end
+
+  test "destroy: returns 404 for credential outside the organization" do
+    other_org  = Organization.create!(name: "Other Org")
+    other_cred, _s = ApiCredential.build_with_secret(organization: other_org,
+                                                     name: "Foreign",
+                                                     scopes: ["analytics:read"])
+    other_cred.save!
+    delete "/api/api_credentials/#{other_cred.id}"
+    assert_response :not_found
+  end
+
+  test "destroy: returns 204 and soft-deletes the credential" do
+    cred = build_credential
+    delete "/api/api_credentials/#{cred.id}"
+    assert_response :no_content
+    assert_equal "deleted", cred.reload.status
+  end
+
+  test "destroy: deleted credential no longer appears in index" do
+    cred = build_credential(name: "Gone Key")
+    delete "/api/api_credentials/#{cred.id}"
+    assert_response :no_content
+
+    get "/api/api_credentials"
+    ids = response.parsed_body.map { |c| c["id"] }
+    refute_includes ids, cred.id
+  end
+
+  test "destroy: deleted credential returns 404 on subsequent requests" do
+    cred = build_credential
+    delete "/api/api_credentials/#{cred.id}"
+    assert_response :no_content
+
+    # A second delete should 404, not succeed again
+    delete "/api/api_credentials/#{cred.id}"
+    assert_response :not_found
+  end
+
+  test "destroy: deleted credential does not count toward active limit" do
+    plan = Plan.create!(
+      name: "One-key Plan #{SecureRandom.hex(4)}", slug: "one-key-del-#{SecureRandom.hex(4)}",
+      monthly_price: 9, api_access_enabled: true, api_credentials_limit: 1
+    )
+    @user.update!(plan: plan, subscription_status: "active")
+
+    cred = build_credential(name: "Key to delete")
+    delete "/api/api_credentials/#{cred.id}"
+    assert_response :no_content
+
+    # Slot freed — should be able to create a new credential
+    post "/api/api_credentials",
+         params: { name: "New Key", scopes: ["analytics:read"] }, as: :json
+    assert_response :created
+  end
+
   # ── POST /api/api_credentials/:id/regenerate_secret ───────────────────────────
 
   test "regenerate_secret: returns 401 when not logged in" do

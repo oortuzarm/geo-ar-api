@@ -105,7 +105,7 @@ Rails.application.routes.draw do
       end
     end
 
-    resources :api_credentials, only: %i[index create update] do
+    resources :api_credentials, only: %i[index create update destroy] do
       member do
         post :regenerate_secret
       end
