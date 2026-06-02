@@ -120,6 +120,8 @@ module Api
         planName:               user.plan&.name,
         planSlug:               user.plan&.slug,
         planFeaturesConfig:     user.plan&.effective_features_config,
+        apiAccessEnabled:       user.api_access_enabled?,
+        apiCredentialsLimit:    user.effective_api_credentials_limit,
         onboardingCompleted:    cols.include?("onboarding_completed") ? user.onboarding_completed : true
       }
     end

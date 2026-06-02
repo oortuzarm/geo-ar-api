@@ -105,6 +105,20 @@ class User < ApplicationRecord
     current_location_count < limit
   end
 
+  # Whether the user's plan grants API access.
+  # nil plan (no plan assigned yet) → allow, so admin users and legacy accounts are unblocked.
+  def api_access_enabled?
+    return true if plan.nil?
+    plan.api_access_enabled
+  end
+
+  # Maximum number of active API credentials allowed for this user's organization.
+  # nil = unlimited (no plan or plan without a limit set).
+  def effective_api_credentials_limit
+    return nil if plan.nil?
+    plan.api_credentials_limit
+  end
+
   private
 
   # Destroy organizations where this user is the sole member before the user

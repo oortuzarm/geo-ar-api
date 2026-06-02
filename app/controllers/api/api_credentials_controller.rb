@@ -34,6 +34,18 @@ module Api
         return
       end
 
+      # ── Plan enforcement ──────────────────────────────────────────────────────
+      unless current_user.api_access_enabled?
+        render json: { error: "Tu plan no incluye acceso a la API." }, status: :forbidden
+        return
+      end
+
+      limit = current_user.effective_api_credentials_limit
+      if limit && current_organization.api_credentials.where(status: "active").count >= limit
+        render json: { error: "Alcanzaste el límite de credenciales API de tu plan." }, status: :unprocessable_entity
+        return
+      end
+
       credential, plaintext_secret = ApiCredential.build_with_secret(
         organization:    current_organization,
         name:            name,

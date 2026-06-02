@@ -276,4 +276,101 @@ class Api::ApiCredentialsControllerTest < ActionDispatch::IntegrationTest
     assert cred.previous_key_expires_at > Time.current
     assert cred.previous_key_expires_at <= 2.hours.from_now
   end
+
+  # ── Plan enforcement (create) ─────────────────────────────────────────────────
+
+  test "create: returns 403 when plan has api_access_enabled = false" do
+    plan = Plan.create!(
+      name:                 "Restricted Plan",
+      slug:                 "restricted-#{SecureRandom.hex(4)}",
+      monthly_price:        9,
+      api_access_enabled:   false,
+      api_credentials_limit: nil
+    )
+    @user.update!(plan: plan, subscription_status: "active")
+
+    post "/api/api_credentials",
+         params: { name: "Key", scopes: ["analytics:read"] }, as: :json
+    assert_response :forbidden
+    assert_match(/plan/, response.parsed_body["error"].downcase)
+  end
+
+  test "create: returns 422 when active credential limit is reached" do
+    plan = Plan.create!(
+      name:                  "Limited Plan",
+      slug:                  "limited-#{SecureRandom.hex(4)}",
+      monthly_price:         9,
+      api_access_enabled:    true,
+      api_credentials_limit: 2
+    )
+    @user.update!(plan: plan, subscription_status: "active")
+
+    build_credential(name: "Key 1")
+    build_credential(name: "Key 2")
+
+    post "/api/api_credentials",
+         params: { name: "Key 3", scopes: ["analytics:read"] }, as: :json
+    assert_response :unprocessable_entity
+    assert_match(/límite/, response.parsed_body["error"])
+  end
+
+  test "create: allows creation when limit not yet reached" do
+    plan = Plan.create!(
+      name:                  "Two-key Plan",
+      slug:                  "two-key-#{SecureRandom.hex(4)}",
+      monthly_price:         9,
+      api_access_enabled:    true,
+      api_credentials_limit: 2
+    )
+    @user.update!(plan: plan, subscription_status: "active")
+
+    build_credential(name: "Key 1")
+
+    post "/api/api_credentials",
+         params: { name: "Key 2", scopes: ["analytics:read"] }, as: :json
+    assert_response :created
+  end
+
+  test "create: revoked credentials do not count toward the limit" do
+    plan = Plan.create!(
+      name:                  "One-key Plan",
+      slug:                  "one-key-#{SecureRandom.hex(4)}",
+      monthly_price:         9,
+      api_access_enabled:    true,
+      api_credentials_limit: 1
+    )
+    @user.update!(plan: plan, subscription_status: "active")
+
+    revoked = build_credential(name: "Revoked Key")
+    revoked.update!(status: "revoked")
+
+    post "/api/api_credentials",
+         params: { name: "New Key", scopes: ["analytics:read"] }, as: :json
+    assert_response :created
+  end
+
+  test "create: nil plan (no plan assigned) allows creation with no limit" do
+    # User with no plan — api_access_enabled? returns true, no limit applied.
+    assert_nil @user.plan
+    post "/api/api_credentials",
+         params: { name: "Planless Key", scopes: ["analytics:read"] }, as: :json
+    assert_response :created
+  end
+
+  test "create: unlimited plan (api_credentials_limit nil) has no cap" do
+    plan = Plan.create!(
+      name:                  "Unlimited Plan",
+      slug:                  "unlimited-#{SecureRandom.hex(4)}",
+      monthly_price:         99,
+      api_access_enabled:    true,
+      api_credentials_limit: nil
+    )
+    @user.update!(plan: plan, subscription_status: "active")
+
+    3.times { |i| build_credential(name: "Key #{i}") }
+
+    post "/api/api_credentials",
+         params: { name: "Key 4", scopes: ["analytics:read"] }, as: :json
+    assert_response :created
+  end
 end

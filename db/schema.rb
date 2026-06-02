@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_02_160000) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_02_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -336,6 +336,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_02_160000) do
     t.string "cta_url"
     t.jsonb "features_config", default: {}, null: false
     t.boolean "is_onboarding_plan", default: false, null: false
+    t.boolean "api_access_enabled", default: true, null: false
+    t.integer "api_credentials_limit"
     t.index ["is_visible"], name: "index_plans_on_is_visible"
     t.index ["slug"], name: "index_plans_on_slug", unique: true
     t.index ["sort_order"], name: "index_plans_on_sort_order"

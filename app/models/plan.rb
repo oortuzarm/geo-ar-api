@@ -63,6 +63,9 @@ class Plan < ApplicationRecord
   validates :location_limit,
     numericality: { only_integer: true, greater_than: 0 },
     allow_nil: true
+  validates :api_credentials_limit,
+    numericality: { only_integer: true, greater_than: 0 },
+    allow_nil: true
 
   before_save :compute_yearly_price
   before_save :ensure_single_onboarding_plan
