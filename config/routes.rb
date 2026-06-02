@@ -105,6 +105,12 @@ Rails.application.routes.draw do
       end
     end
 
+    resources :api_credentials, only: %i[index create update] do
+      member do
+        post :regenerate_secret
+      end
+    end
+
     resources :analytics_events, only: %i[create]
 
     # Standalone update/delete for geo_points
