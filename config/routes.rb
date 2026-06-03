@@ -55,6 +55,7 @@ Rails.application.routes.draw do
         get :analytics_by_day,        to: "analytics_events#by_day"
         get :analytics_geo,           to: "analytics_events#geo_distribution"
         get :historical_intensity,    to: "analytics_events#historical_intensity"
+        get :analytics_destinations,  to: "analytics_events#analytics_destinations"
         get :live_visits,             to: "live_visits#index"
       end
       resources :geo_points, only: %i[index create]

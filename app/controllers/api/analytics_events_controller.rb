@@ -2,7 +2,7 @@ module Api
   class AnalyticsEventsController < ApplicationController
     include AnalyticsQueryable
 
-    ANALYTICS_ACTIONS = %i[stats stats_by_point by_hour by_day geo_distribution historical_intensity].freeze
+    ANALYTICS_ACTIONS = %i[stats stats_by_point by_hour by_day geo_distribution historical_intensity analytics_destinations].freeze
 
     before_action :authenticate_user!,         only: ANALYTICS_ACTIONS
     before_action :set_and_authorize_project!, only: ANALYTICS_ACTIONS
@@ -198,6 +198,65 @@ module Api
       data   = counts.map { |day, count| { day: day.to_i, count: count } }
                      .sort_by { |h| h[:day] }
       render json: { data: data }
+    end
+
+    # GET /api/geo_projects/:id/analytics_destinations[?from=&to=&point_id=]
+    #
+    # Aggregates point_click events that carry context_metadata to answer:
+    # "What did the user do after interacting with a location?"
+    #
+    # Returns:
+    #   totalClicks      — all point_click events (including legacy without context)
+    #   contextualClicks — subset that carries content_type/destination_category
+    #   legacyClicks     — clicks without context (before Phase 1 tracking)
+    #   topContentType   — most-clicked content type, or null
+    #   topCategory      — most-clicked destination category, or null
+    #   byContentType    — [{contentType, clicks, share}] sorted desc
+    #   byCategory       — [{category, clicks, share}] sorted desc (URL type only)
+    def analytics_destinations
+      clicks = point_scoped_events
+      return if performed?
+
+      clicks = clicks.where(event_type: "point_click")
+      total  = clicks.count
+
+      contextual = clicks.where.not(context_metadata: nil)
+
+      # — By content type ———————————————————————————————————————————
+      ct_raw   = contextual
+                   .where("context_metadata->>'content_type' IS NOT NULL")
+                   .group(Arel.sql("context_metadata->>'content_type'"))
+                   .count
+                   .sort_by { |_, n| -n }
+      ct_total = ct_raw.sum { |_, n| n }
+      by_ct    = ct_raw.map do |ct, n|
+        { contentType: ct, clicks: n,
+          share: ct_total > 0 ? (n.to_f / ct_total * 100).round : 0 }
+      end
+
+      # — By destination category (URL type only) ————————————————————
+      cat_raw   = contextual
+                    .where("context_metadata->>'destination_category' IS NOT NULL")
+                    .group(Arel.sql("context_metadata->>'destination_category'"))
+                    .count
+                    .sort_by { |_, n| -n }
+      cat_total = cat_raw.sum { |_, n| n }
+      by_cat    = cat_raw.map do |cat, n|
+        { category: cat, clicks: n,
+          share: cat_total > 0 ? (n.to_f / cat_total * 100).round : 0 }
+      end
+
+      contextual_count = contextual.count
+
+      render json: {
+        totalClicks:      total,
+        contextualClicks: contextual_count,
+        legacyClicks:     total - contextual_count,
+        topContentType:   by_ct.first&.dig(:contentType),
+        topCategory:      by_cat.first&.dig(:category),
+        byContentType:    by_ct,
+        byCategory:       by_cat
+      }
     end
 
     # GET /api/geo_projects/:id/historical_intensity
