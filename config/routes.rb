@@ -4,6 +4,10 @@ Rails.application.routes.draw do
     namespace :v1 do
       get "health", to: "health#index"
 
+      namespace :analytics do
+        get :hotspots, to: "hotspots#index"
+      end
+
       resources :projects, only: %i[index show] do
         resources :locations, only: %i[index], shallow: false
         member do
