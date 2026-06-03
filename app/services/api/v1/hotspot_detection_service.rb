@@ -6,28 +6,52 @@ module Api
       PRECISION     = 4
       CELL_RADIUS_M = 8
 
-      Result  = Data.define(:hotspots, :total_events, :filtered_events)
+      Result  = Data.define(:hotspots, :total_points, :filtered_points)
       Hotspot = Data.define(:lat, :lng, :count, :intensity, :radius_meters)
 
-      def initialize(geo_point, from: nil, to: nil)
+      def initialize(geo_point, mode: :historical, from: nil, to: nil)
         @geo_point = geo_point
+        @mode      = mode
         @from      = from
         @to        = to
       end
 
       def call
-        raw     = fetch_valid_coordinates
-        bounded = filter_to_boundary(raw)
+        raw, bounded = fetch_coordinates
         Result.new(
           hotspots:        cluster_and_normalize(bounded),
-          total_events:    raw.size,
-          filtered_events: bounded.size
+          total_points:    raw.size,
+          filtered_points: bounded.size
         )
       end
 
       private
 
-      # Fetch [lat, lng] pairs for radius_enter events with valid coordinates.
+      def fetch_coordinates
+        if @mode == :live
+          coords = fetch_live_coordinates
+          [coords, coords]  # inside_radius: true is already a boundary pre-filter
+        else
+          raw     = fetch_valid_coordinates
+          bounded = filter_to_boundary(raw)
+          [raw, bounded]
+        end
+      end
+
+      # Live mode: active sessions currently inside the boundary.
+      # GeoPointLiveVisit.inside_radius already ran GeoEngine — no second pass needed.
+      # Excludes null island defensively since (0,0) validations allow that coordinate.
+      def fetch_live_coordinates
+        GeoPointLiveVisit
+          .where(geo_point: @geo_point)
+          .active_now
+          .inside_radius
+          .where.not(lat: nil, lng: nil)
+          .where("NOT (lat = 0 AND lng = 0)")
+          .pluck(:lat, :lng)
+      end
+
+      # Historical mode: fetch [lat, lng] pairs for radius_enter events with valid coordinates.
       # Excludes: nil, out-of-range, and null-island (0, 0) coordinates.
       def fetch_valid_coordinates
         scope = AnalyticsEvent

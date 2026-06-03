@@ -104,8 +104,8 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
     assert_equal "Plaza Mayor", data["locationName"]
     assert data["hotspots"].is_a?(Array)
     assert data.key?("meta")
-    assert data["meta"].key?("totalEvents")
-    assert data["meta"].key?("filteredEvents")
+    assert data["meta"].key?("totalPoints")
+    assert data["meta"].key?("filteredPoints")
   end
 
   test "hotspot entries have required fields" do
@@ -144,8 +144,8 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
     assert_response :ok
 
     meta = response.parsed_body["data"]["meta"]
-    assert_equal 3, meta["totalEvents"]
-    assert_equal 3, meta["filteredEvents"]
+    assert_equal 3, meta["totalPoints"]
+    assert_equal 3, meta["filteredPoints"]
   end
 
   # ── Clustering ────────────────────────────────────────────────────────────────
@@ -172,8 +172,8 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
 
     data = response.parsed_body["data"]
     assert_equal [],  data["hotspots"]
-    assert_equal 0,   data["meta"]["totalEvents"]
-    assert_equal 0,   data["meta"]["filteredEvents"]
+    assert_equal 0,   data["meta"]["totalPoints"]
+    assert_equal 0,   data["meta"]["filteredPoints"]
   end
 
   test "excludes point_click events from hotspot calculation" do
@@ -186,7 +186,7 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
 
     get "/api/v1/analytics/hotspots?location_id=#{click_point.id}", headers: auth_header
     assert_response :ok
-    assert_equal 0, response.parsed_body["data"]["meta"]["totalEvents"]
+    assert_equal 0, response.parsed_body["data"]["meta"]["totalPoints"]
   end
 
   # ── Date range filtering ──────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
     get "/api/v1/analytics/hotspots?location_id=#{dated_point.id}&start_date=#{Date.today}",
         headers: auth_header
     assert_response :ok
-    assert_equal 1, response.parsed_body["data"]["meta"]["totalEvents"]
+    assert_equal 1, response.parsed_body["data"]["meta"]["totalPoints"]
   end
 
   test "filters by end_date" do
@@ -222,13 +222,84 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
     get "/api/v1/analytics/hotspots?location_id=#{dated_point.id}&end_date=2025-12-31",
         headers: auth_header
     assert_response :ok
-    assert_equal 1, response.parsed_body["data"]["meta"]["totalEvents"]
+    assert_equal 1, response.parsed_body["data"]["meta"]["totalPoints"]
   end
 
   test "ignores malformed date params gracefully" do
     get "/api/v1/analytics/hotspots?location_id=#{@point.id}&start_date=not-a-date",
         headers: auth_header
     assert_response :ok
-    assert_equal 3, response.parsed_body["data"]["meta"]["totalEvents"]
+    assert_equal 3, response.parsed_body["data"]["meta"]["totalPoints"]
+  end
+
+  # ── mode param ────────────────────────────────────────────────────────────────
+
+  test "defaults to historical when mode is absent" do
+    get "/api/v1/analytics/hotspots?location_id=#{@point.id}", headers: auth_header
+    assert_response :ok
+    assert_equal "historical", response.parsed_body["data"]["mode"]
+  end
+
+  test "defaults to historical for unrecognized mode values" do
+    get "/api/v1/analytics/hotspots?location_id=#{@point.id}&mode=bogus", headers: auth_header
+    assert_response :ok
+    assert_equal "historical", response.parsed_body["data"]["mode"]
+  end
+
+  test "response includes mode field" do
+    get "/api/v1/analytics/hotspots?location_id=#{@point.id}&mode=live", headers: auth_header
+    assert_response :ok
+    assert_equal "live", response.parsed_body["data"]["mode"]
+  end
+
+  # ── Live mode ─────────────────────────────────────────────────────────────────
+
+  test "live: returns empty hotspots when no active sessions exist" do
+    get "/api/v1/analytics/hotspots?location_id=#{@point.id}&mode=live", headers: auth_header
+    assert_response :ok
+
+    data = response.parsed_body["data"]
+    assert_equal "live", data["mode"]
+    assert_equal [],     data["hotspots"]
+    assert_equal 0,      data["meta"]["totalPoints"]
+    assert_equal 0,      data["meta"]["filteredPoints"]
+  end
+
+  test "live: returns hotspots from active inside-boundary sessions" do
+    GeoPointLiveVisit.create!(geo_project: @project, geo_point: @point,
+                               session_id: "live-a", lat: -34.0001, lng: -58.0001,
+                               inside_radius: true, last_seen_at: Time.current)
+    GeoPointLiveVisit.create!(geo_project: @project, geo_point: @point,
+                               session_id: "live-b", lat: -34.0001, lng: -58.0001,
+                               inside_radius: true, last_seen_at: Time.current)
+
+    get "/api/v1/analytics/hotspots?location_id=#{@point.id}&mode=live", headers: auth_header
+    assert_response :ok
+
+    data = response.parsed_body["data"]
+    assert_equal 1,   data["hotspots"].size
+    assert_equal 2,   data["hotspots"].first["count"]
+    assert_equal 1.0, data["hotspots"].first["intensity"]
+    assert_equal 2,   data["meta"]["totalPoints"]
+  end
+
+  test "live: excludes inactive sessions" do
+    GeoPointLiveVisit.create!(geo_project: @project, geo_point: @point,
+                               session_id: "active", lat: -34.0001, lng: -58.0001,
+                               inside_radius: true, last_seen_at: Time.current)
+    GeoPointLiveVisit.create!(geo_project: @project, geo_point: @point,
+                               session_id: "stale", lat: -34.0001, lng: -58.0001,
+                               inside_radius: true, last_seen_at: 2.minutes.ago)
+
+    get "/api/v1/analytics/hotspots?location_id=#{@point.id}&mode=live", headers: auth_header
+    assert_response :ok
+    assert_equal 1, response.parsed_body["data"]["meta"]["totalPoints"]
+  end
+
+  test "live: historical events are not included" do
+    # The setup has 3 radius_enter AnalyticsEvents; live mode must ignore them
+    get "/api/v1/analytics/hotspots?location_id=#{@point.id}&mode=live", headers: auth_header
+    assert_response :ok
+    assert_equal 0, response.parsed_body["data"]["meta"]["totalPoints"]
   end
 end

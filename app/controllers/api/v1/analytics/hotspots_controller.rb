@@ -5,10 +5,14 @@ module Api
         before_action -> { require_scope!("analytics:read") }
         before_action :load_geo_point!
 
-        # GET /api/v1/analytics/hotspots?location_id=UUID&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+        # GET /api/v1/analytics/hotspots?location_id=UUID&mode=historical|live
+        #   historical (default): &start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+        #   live: ignores date params; uses active sessions from GeoPointLiveVisit
         def index
+          mode   = parse_mode(params[:mode])
           result = HotspotDetectionService.new(
             @geo_point,
+            mode: mode,
             from: parse_date(params[:start_date]),
             to:   parse_date(params[:end_date])
           ).call
@@ -16,10 +20,11 @@ module Api
           render_ok({
             locationId:   @geo_point.id,
             locationName: @geo_point.name,
+            mode:         mode,
             hotspots:     result.hotspots.map { |h| serialize_hotspot(h) },
             meta: {
-              totalEvents:    result.total_events,
-              filteredEvents: result.filtered_events
+              totalPoints:    result.total_points,
+              filteredPoints: result.filtered_points
             }
           })
         end
@@ -51,6 +56,10 @@ module Api
             intensity:    hotspot.intensity,
             radiusMeters: hotspot.radius_meters
           }
+        end
+
+        def parse_mode(value)
+          value.to_s == "live" ? :live : :historical
         end
 
         def parse_date(value)
