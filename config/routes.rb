@@ -29,6 +29,11 @@ Rails.application.routes.draw do
 
   # ── Existing API (Studio / Public) ───────────────────────────────────────────
   namespace :api do
+    # ── Studio analytics (session auth) ─────────────────────────────────────
+    namespace :analytics do
+      get :hotspots, to: "hotspots#index"
+    end
+
     post   "auth/register",        to: "auth#register"
     post   "auth/login",           to: "auth#login"
     get    "auth/me",              to: "auth#me"
