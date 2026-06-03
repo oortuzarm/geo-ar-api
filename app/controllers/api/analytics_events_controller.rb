@@ -213,6 +213,10 @@ module Api
     #   topCategory      — most-clicked destination category, or null
     #   byContentType    — [{contentType, clicks, share}] sorted desc
     #   byCategory       — [{category, clicks, share}] sorted desc (URL type only)
+    #   byLocation       — [{pointId, pointName, totalClicks, topDest,
+    #                        topDestClicks, topDestShare}] sorted by totalClicks desc
+    #                      topDest is destination_category when present,
+    #                      falling back to content_type for non-URL clicks.
     def analytics_destinations
       clicks = point_scoped_events
       return if performed?
@@ -246,6 +250,49 @@ module Api
           share: cat_total > 0 ? (n.to_f / cat_total * 100).round : 0 }
       end
 
+      # — By location ————————————————————————————————————————————————
+      # Total contextual clicks per point
+      per_point_total = contextual.group(:geo_point_id).count
+
+      # Clicks per (point, unified_dest): prefer destination_category, fall back to content_type.
+      # Using COALESCE ensures non-URL clicks still appear under their content_type.
+      unified_dest_sql = Arel.sql(
+        "COALESCE(context_metadata->>'destination_category', context_metadata->>'content_type')"
+      )
+      per_point_dest = contextual
+                         .where("#{unified_dest_sql} IS NOT NULL")
+                         .group(:geo_point_id, unified_dest_sql)
+                         .count
+
+      # Group per_point_dest by point_id for O(1) lookup
+      grouped_by_point = per_point_dest.each_with_object({}) do |((pid, dest), n), h|
+        h[pid] ||= {}
+        h[pid][dest] = n
+      end
+
+      # Load names only for the points that have contextual clicks
+      names_by_id = @project.geo_points
+                      .where(id: per_point_total.keys)
+                      .pluck(:id, :name)
+                      .to_h
+
+      by_location = per_point_total.filter_map do |pid, total_pt|
+        name = names_by_id[pid]
+        next unless name
+
+        dest_counts = grouped_by_point[pid] || {}
+        top_dest, top_n = dest_counts.max_by { |_, n| n }
+
+        {
+          pointId:       pid,
+          pointName:     name,
+          totalClicks:   total_pt,
+          topDest:       top_dest,
+          topDestClicks: top_n || 0,
+          topDestShare:  (top_dest && total_pt > 0) ? (top_n.to_f / total_pt * 100).round(1) : 0.0
+        }
+      end.sort_by { |loc| -loc[:totalClicks] }
+
       contextual_count = contextual.count
 
       render json: {
@@ -255,7 +302,8 @@ module Api
         topContentType:   by_ct.first&.dig(:contentType),
         topCategory:      by_cat.first&.dig(:category),
         byContentType:    by_ct,
-        byCategory:       by_cat
+        byCategory:       by_cat,
+        byLocation:       by_location
       }
     end
 
