@@ -63,16 +63,22 @@ module Api
       # ── Sanitize session_id ──────────────────────────────────────────────────
       session_id = params[:session_id].to_s.slice(0, SESSION_ID_MAX).presence
 
+      # ── Extract and sanitize context_metadata ────────────────────────────────
+      # Only stores known, safe keys — content_type and destination_category.
+      # Unknown keys are silently dropped to prevent storing arbitrary data.
+      context_metadata = extract_click_context
+
       if NON_DEDUPLICATED_TYPES.include?(event_type)
         # Every occurrence is a distinct event — no deduplication by session or day.
         event = AnalyticsEvent.new(
-          geo_project_id: project_id,
-          geo_point_id:   point_id,
-          event_type:     event_type,
-          session_id:     session_id,
-          event_date:     Date.current,
-          latitude:       params[:latitude].presence&.to_f,
-          longitude:      params[:longitude].presence&.to_f,
+          geo_project_id:   project_id,
+          geo_point_id:     point_id,
+          event_type:       event_type,
+          session_id:       session_id,
+          event_date:       Date.current,
+          latitude:         params[:latitude].presence&.to_f,
+          longitude:        params[:longitude].presence&.to_f,
+          context_metadata: context_metadata,
         )
         event.save!
         geocode_async(event) if event.latitude && event.longitude
@@ -95,8 +101,9 @@ module Api
           return
         end
 
-        event.latitude  = params[:latitude].presence&.to_f
-        event.longitude = params[:longitude].presence&.to_f
+        event.latitude         = params[:latitude].presence&.to_f
+        event.longitude        = params[:longitude].presence&.to_f
+        event.context_metadata = context_metadata
         event.save!
 
         geocode_async(event) if event.latitude && event.longitude
@@ -242,6 +249,27 @@ module Api
     def set_and_authorize_project!
       @project = GeoProject.find(params[:id])
       authorize_project!(@project)
+    end
+
+    # Extracts safe, known keys from params[:context_metadata].
+    # Returns a Hash with at most { "content_type" => "url", "destination_category" => "whatsapp" }
+    # or nil when no valid context is present.
+    # All unknown keys are dropped — this is a public endpoint and must be hardened.
+    def extract_click_context
+      raw = params[:context_metadata]
+      return nil unless raw.is_a?(ActionController::Parameters) || raw.is_a?(Hash)
+
+      h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h.stringify_keys : raw.stringify_keys
+
+      result = {}
+
+      ct = h["content_type"].to_s.presence
+      result["content_type"] = ct if GeoPoint::CONTENT_TYPES.include?(ct)
+
+      dc = h["destination_category"].to_s.presence
+      result["destination_category"] = dc if GeoPoint::DESTINATION_CATEGORIES.include?(dc)
+
+      result.presence
     end
 
     # Spawns a fire-and-forget thread to reverse-geocode and update the event.
