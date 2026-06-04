@@ -13,7 +13,7 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
     @org = Organization.create!(name: "Hotspot Org #{SecureRandom.hex(4)}")
     Membership.create!(user: @user, organization: @org, role: "owner")
 
-    @project = GeoProject.create!(title: "Hotspot Project", status: "active", user: @user)
+    @project = GeoProject.create!(title: "Hotspot Project", status: "active", user: @user, organization: @org)
 
     # Default radius 50m — events at ~14m and ~43m from center, both inside boundary
     @point = GeoPoint.create!(
@@ -85,7 +85,8 @@ class Api::V1::Analytics::HotspotsControllerTest < ActionDispatch::IntegrationTe
   test "returns 404 for location outside organization" do
     other_user    = User.create!(email: "other_#{SecureRandom.hex(4)}@example.com",
                                   password: "pw", role: "user", status: "active")
-    other_project = GeoProject.create!(title: "Foreign", status: "active", user: other_user)
+    other_org     = Organization.create!(name: "Other Org #{SecureRandom.hex(4)}")
+    other_project = GeoProject.create!(title: "Foreign", status: "active", user: other_user, organization: other_org)
     foreign_point = GeoPoint.create!(geo_project: other_project, name: "Foreign",
                                       latitude: 0, longitude: 0, order: 0)
 

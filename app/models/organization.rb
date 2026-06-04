@@ -3,6 +3,7 @@ class Organization < ApplicationRecord
   has_many :users,          through:   :memberships
   has_many :invitations,    dependent: :destroy
   has_many :api_credentials, dependent: :destroy
+  has_many :geo_projects,   dependent: :destroy
   has_many :smart_links,    dependent: :destroy
 
   before_validation :generate_slug_from_name

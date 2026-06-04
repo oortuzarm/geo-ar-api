@@ -108,13 +108,14 @@ module Api
 
     def project_accessible?(project_id)
       return true if current_user.role == "admin"
-      current_user.geo_projects.exists?(id: project_id)
+      current_organization&.geo_projects&.exists?(id: project_id)
     end
 
     def valid_geo_point_ids(project_id)
       return [] if params[:geo_point_ids].blank?
+      return [] unless current_organization
       GeoPoint.joins(:geo_project)
-              .where(geo_projects: { user_id: current_user.id })
+              .where(geo_projects: { organization_id: current_organization.id })
               .where(geo_project_id: project_id)
               .where(id: Array(params[:geo_point_ids]))
               .pluck(:id)

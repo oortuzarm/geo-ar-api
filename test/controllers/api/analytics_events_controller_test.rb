@@ -6,7 +6,8 @@ class Api::AnalyticsEventsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @user    = User.create!(email: "ae_#{SecureRandom.hex(4)}@example.com",
                             password: "pw", role: "user", status: "active")
-    @project = GeoProject.create!(title: "Test", status: "active", user: @user)
+    @org     = Organization.create!(name: "AE Org #{SecureRandom.hex(4)}")
+    @project = GeoProject.create!(title: "Test", status: "active", user: @user, organization: @org)
     @point   = GeoPoint.create!(
       geo_project: @project, name: "P", latitude: -34.0, longitude: -58.0, order: 0
     )

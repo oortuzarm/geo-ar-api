@@ -5,13 +5,14 @@ module Api
     before_action :authorize_project_access!, only: %i[show update destroy sync]
 
     # GET /api/geo_projects
-    # Always scoped to current_user regardless of role.
+    # Scoped to current organization. All members of the org see all org projects.
     # Admin global access lives exclusively in /api/admin.
     def index
-      projects = current_user.geo_projects.order(updated_at: :desc).to_a
+      org      = current_organization
+      projects = org ? org.geo_projects.order(updated_at: :desc).to_a : []
       Rails.logger.info "[GEO_PROJECTS_INDEX_SCOPE] user_id=#{current_user.id} " \
                         "email=#{current_user.email} role=#{current_user.role} " \
-                        "count=#{projects.size} ids=#{projects.map(&:id).inspect}"
+                        "org_id=#{org&.id} count=#{projects.size}"
       render json: projects.map(&:as_api_json)
     end
 
@@ -24,7 +25,9 @@ module Api
 
     # POST /api/geo_projects
     def create
-      project = current_user.geo_projects.create!(project_params)
+      org = current_organization
+      return render json: { error: "No perteneces a ninguna organización." }, status: :forbidden unless org
+      project = org.geo_projects.create!(project_params.merge(user_id: current_user.id))
       render json: project.as_api_json, status: :created
     end
 
@@ -176,9 +179,11 @@ module Api
     def set_project
       @project = if current_user.role == "admin"
                    GeoProject.find(params[:id])
-      else
-                   current_user.geo_projects.find(params[:id])
-      end
+                 elsif current_organization
+                   current_organization.geo_projects.find(params[:id])
+                 else
+                   raise ActiveRecord::RecordNotFound
+                 end
     end
 
     def authorize_project_access!

@@ -8,7 +8,8 @@ class Api::V1::HotspotDetectionServiceTest < ActiveSupport::TestCase
   setup do
     @user    = User.create!(email:    "svc_#{SecureRandom.hex(4)}@example.com",
                              password: "pw", role: "user", status: "active")
-    @project = GeoProject.create!(title: "SvcTest", status: "active", user: @user)
+    @org     = Organization.create!(name: "Hotspot Svc Org #{SecureRandom.hex(4)}")
+    @project = GeoProject.create!(title: "SvcTest", status: "active", user: @user, organization: @org)
     @point   = GeoPoint.create!(geo_project: @project, name: "Zone",
                                  latitude: -34.0, longitude: -58.0, order: 0)
   end

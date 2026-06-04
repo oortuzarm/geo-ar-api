@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_04_000006) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_04_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -124,7 +124,9 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000006) do
     t.uuid "user_id"
     t.boolean "community_enabled", default: false, null: false
     t.string "community_status", default: "pending", null: false
+    t.uuid "organization_id", null: false
     t.index ["community_enabled", "community_status"], name: "index_geo_projects_on_community"
+    t.index ["organization_id"], name: "index_geo_projects_on_organization_id"
     t.index ["status"], name: "index_geo_projects_on_status"
     t.index ["user_id"], name: "index_geo_projects_on_user_id"
   end
@@ -433,6 +435,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000006) do
   add_foreign_key "geo_point_live_visits", "geo_points"
   add_foreign_key "geo_point_live_visits", "geo_projects"
   add_foreign_key "geo_points", "geo_projects"
+  add_foreign_key "geo_projects", "organizations"
   add_foreign_key "geo_projects", "users"
   add_foreign_key "idempotency_keys", "api_credentials"
   add_foreign_key "invitations", "organizations"

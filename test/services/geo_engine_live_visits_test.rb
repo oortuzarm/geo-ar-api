@@ -2,12 +2,13 @@ require "test_helper"
 
 class GeoEngineLiveVisitsTest < ActiveSupport::TestCase
   setup do
-    @project = GeoProject.create!(title: "Test Project", status: "active")
+    @org     = Organization.create!(name: "LiveVisit Org #{SecureRandom.hex(4)}")
+    @project = GeoProject.create!(title: "Test Project", status: "active", organization: @org)
     @point   = GeoPoint.create!(
-      geo_project:      @project,
-      latitude:         -33.437,
-      longitude:        -70.650,
-      availability:     {}
+      geo_project:  @project,
+      latitude:     -33.437,
+      longitude:    -70.650,
+      availability: {}
     )
   end
 
@@ -15,6 +16,7 @@ class GeoEngineLiveVisitsTest < ActiveSupport::TestCase
     GeoPointLiveVisit.delete_all
     GeoPoint.delete_all
     GeoProject.delete_all
+    Organization.where(id: @org.id).destroy_all
   end
 
   # ── live_visits_enabled? ───────────────────────────────────────────────────

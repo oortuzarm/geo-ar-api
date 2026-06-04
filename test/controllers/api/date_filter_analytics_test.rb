@@ -16,7 +16,7 @@ class DateFilterAnalyticsTest < ActionDispatch::IntegrationTest
     @org = Organization.create!(name: "DateFilter Org #{SecureRandom.hex(4)}")
     Membership.create!(user: @user, organization: @org, role: "owner")
 
-    @project = GeoProject.create!(title: "Filter Project", status: "active", user: @user)
+    @project = GeoProject.create!(title: "Filter Project", status: "active", user: @user, organization: @org)
 
     @point = GeoPoint.create!(
       geo_project: @project, name: "Point", latitude: -34.0, longitude: -58.0, order: 0

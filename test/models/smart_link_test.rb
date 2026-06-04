@@ -5,7 +5,7 @@ class SmartLinkTest < ActiveSupport::TestCase
     @user    = User.create!(email: "sl_test_#{SecureRandom.hex(4)}@example.com",
                              password: "password123", role: "user", status: "active")
     @org     = Organization.create!(name: "Test Org #{SecureRandom.hex(4)}")
-    @project = GeoProject.create!(title: "Test Project", status: "active", user: @user)
+    @project = GeoProject.create!(title: "Test Project", status: "active", user: @user, organization: @org)
     @point   = GeoPoint.create!(geo_project: @project, latitude: -33.437, longitude: -70.650)
   end
 

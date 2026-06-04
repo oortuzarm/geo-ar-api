@@ -9,7 +9,7 @@ class Api::V1::PresenceValidationLiveVisitsTest < ActiveSupport::TestCase
 
   setup do
     @org     = Organization.create!(name: "Test Org #{SecureRandom.hex(4)}")
-    @project = GeoProject.create!(title: "Test", status: "active")
+    @project = GeoProject.create!(title: "Test", status: "active", organization: @org)
     @point   = GeoPoint.create!(
       geo_project: @project,
       latitude:    LAT,

@@ -7,13 +7,14 @@ class Api::Public::GeoPointsAccessLiveVisitsTest < ActionDispatch::IntegrationTe
   LNG = -70.650
 
   setup do
-    @project = GeoProject.create!(title: "Test Project", status: "active")
+    @org     = Organization.create!(name: "GPAccess Org #{SecureRandom.hex(4)}")
+    @project = GeoProject.create!(title: "Test Project", status: "active", organization: @org)
     @point   = GeoPoint.create!(
-      geo_project:    @project,
-      latitude:       LAT,
-      longitude:      LNG,
-      lookiar_url:    "https://example.com",
-      availability:   {
+      geo_project:  @project,
+      latitude:     LAT,
+      longitude:    LNG,
+      lookiar_url:  "https://example.com",
+      availability: {
         "live_visits_enabled" => true,
         "live_visits_minimum" => 3
       }
@@ -24,6 +25,7 @@ class Api::Public::GeoPointsAccessLiveVisitsTest < ActionDispatch::IntegrationTe
     GeoPointLiveVisit.delete_all
     GeoPoint.delete_all
     GeoProject.delete_all
+    Organization.where(id: @org.id).destroy_all
   end
 
   # ── Condition disabled passes through ──────────────────────────────────────

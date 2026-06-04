@@ -6,7 +6,7 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
                              password: "password123", role: "user", status: "active")
     @org     = Organization.create!(name: "Test Org #{SecureRandom.hex(4)}")
     Membership.create!(user: @user, organization: @org, role: "owner")
-    @project = GeoProject.create!(title: "Test", status: "active", user: @user)
+    @project = GeoProject.create!(title: "Test", status: "active", user: @user, organization: @org)
     @point   = GeoPoint.create!(geo_project: @project, latitude: -33.437, longitude: -70.650)
 
     post "/api/auth/login",
@@ -138,7 +138,8 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "create: returns 404 for project not accessible to user" do
-    other_project = GeoProject.create!(title: "Other", status: "active")
+    other_org     = Organization.create!(name: "Other Org #{SecureRandom.hex(4)}")
+    other_project = GeoProject.create!(title: "Other", status: "active", organization: other_org)
     post "/api/smart_links",
          params: { name: "X", projectId: other_project.id, scopeType: "project",
                    destinationType: "external_url", destinationUrl: "https://x.com" }, as: :json

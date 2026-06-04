@@ -50,9 +50,10 @@ class ApplicationController < ActionController::API
   end
 
   def authorize_project!(project)
-    unless project.user_id == current_user.id || current_user.role == "admin"
+    unless project.organization_id == current_organization&.id || current_user.role == "admin"
       Rails.logger.warn "[GEO_PROJECT_OWNERSHIP_DENIED] user_id=#{current_user.id} " \
-                        "project_id=#{project.id} owner_id=#{project.user_id} action=#{action_name}"
+                        "project_id=#{project.id} project_org_id=#{project.organization_id} " \
+                        "current_org_id=#{current_organization&.id} action=#{action_name}"
       render json: { error: "No autorizado" }, status: :forbidden
       throw :abort
     end

@@ -15,9 +15,10 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
     Membership.create!(user: @user, organization: @org, role: "owner")
 
     @project = GeoProject.create!(
-      title:  "Test Project",
-      status: "active",
-      user:   @user
+      title:        "Test Project",
+      status:       "active",
+      user:         @user,
+      organization: @org
     )
 
     @point_a = GeoPoint.create!(
@@ -90,7 +91,8 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
 
   test "summary: returns 404 for project not in organization" do
     other_user    = User.create!(email: "other_#{SecureRandom.hex(4)}@example.com", password: "pw", role: "user", status: "active")
-    other_project = GeoProject.create!(title: "Other", status: "active", user: other_user)
+    other_org     = Organization.create!(name: "Other Org #{SecureRandom.hex(4)}")
+    other_project = GeoProject.create!(title: "Other", status: "active", user: other_user, organization: other_org)
     get "/api/v1/projects/#{other_project.id}/analytics", headers: auth_header
     assert_response :not_found
   end
@@ -127,7 +129,7 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
 
   test "summary: returns 404 when location_id not in project" do
     other_point = GeoPoint.create!(
-      geo_project: GeoProject.create!(title: "X", status: "active", user: @user),
+      geo_project: GeoProject.create!(title: "X", status: "active", user: @user, organization: @org),
       name: "Foreign", latitude: 0, longitude: 0, order: 0
     )
     get "/api/v1/projects/#{@project.id}/analytics?location_id=#{other_point.id}", headers: auth_header

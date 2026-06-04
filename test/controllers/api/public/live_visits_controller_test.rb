@@ -6,7 +6,8 @@ class Api::Public::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   SESSION = "a1b2c3d4-e5f6-4a7b-89cd-ef0123456789"
 
   setup do
-    @project = GeoProject.create!(title: "Test", status: "active")
+    @org     = Organization.create!(name: "LV Org #{SecureRandom.hex(4)}")
+    @project = GeoProject.create!(title: "Test", status: "active", organization: @org)
     @point   = GeoPoint.create!(
       geo_project:       @project,
       latitude:          LAT,
@@ -19,6 +20,7 @@ class Api::Public::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
     GeoPointLiveVisit.delete_all
     GeoPoint.delete_all
     GeoProject.delete_all
+    Organization.where(id: @org.id).destroy_all
   end
 
   # ── Basic response fields ──────────────────────────────────────────────────

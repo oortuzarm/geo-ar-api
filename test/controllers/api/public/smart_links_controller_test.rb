@@ -9,7 +9,7 @@ class Api::Public::SmartLinksControllerTest < ActionDispatch::IntegrationTest
                              password: "pw", role: "user", status: "active")
     @org     = Organization.create!(name: "Test Org #{SecureRandom.hex(4)}")
     Membership.create!(user: @user, organization: @org, role: "owner")
-    @project = GeoProject.create!(title: "Test", status: "active", user: @user)
+    @project = GeoProject.create!(title: "Test", status: "active", user: @user, organization: @org)
     @point   = GeoPoint.create!(
       geo_project:       @project,
       latitude:          LAT,
