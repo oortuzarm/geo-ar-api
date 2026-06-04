@@ -61,7 +61,8 @@ module Api
         render json: {
           insideRadius:   inside,
           distanceMeters: dist.round(1),
-          radiusMeters:   point.activation_radius
+          radiusMeters:   point.activation_radius,
+          active_now:     GeoEngine.live_visits_count(point)
         }
       rescue ActiveRecord::RecordInvalid => e
         render json: { error: e.message }, status: :unprocessable_entity
