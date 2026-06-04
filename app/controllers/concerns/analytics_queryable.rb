@@ -82,4 +82,14 @@ module AnalyticsQueryable
   rescue ArgumentError, TypeError
     nil
   end
+
+  # SQL-safe IN-list strings for unified event groups.
+  # Values come from our own constants — no user input, no injection risk.
+  def entry_events_sql
+    AnalyticsEvent::ENTRY_EVENTS.map { |t| "'#{t}'" }.join(", ")
+  end
+
+  def conversion_events_sql
+    AnalyticsEvent::CONVERSION_EVENTS.map { |t| "'#{t}'" }.join(", ")
+  end
 end

@@ -119,14 +119,14 @@ module Api
     def stats
       scope = point_scoped_events
 
-      radius_entries  = scope.where(event_type: "radius_enter").count
-      clicks          = scope.where(event_type: "point_click").count
+      radius_entries  = scope.where(event_type: AnalyticsEvent::ENTRY_EVENTS).count
+      clicks          = scope.where(event_type: AnalyticsEvent::CONVERSION_EVENTS).count
 
-      # Conversion = unique sessions that clicked ÷ unique sessions that entered.
-      # Uses distinct session_id so the rate is always 0–100% and represents
-      # "people converted", not raw click intensity.
-      unique_enterers = scope.where(event_type: "radius_enter").distinct.count(:session_id)
-      unique_clickers = scope.where(event_type: "point_click").distinct.count(:session_id)
+      # Conversion = unique sessions that converted ÷ unique sessions that entered.
+      # Counts all entry channels (map, API v1, Smart Links) as entries, and all
+      # conversion channels (map clicks, API destinations) as conversions.
+      unique_enterers = scope.where(event_type: AnalyticsEvent::ENTRY_EVENTS).distinct.count(:session_id)
+      unique_clickers = scope.where(event_type: AnalyticsEvent::CONVERSION_EVENTS).distinct.count(:session_id)
       conversion      = unique_enterers > 0 ? (unique_clickers.to_f / unique_enterers * 100).round : 0
 
       render json: {
@@ -143,16 +143,18 @@ module Api
     # Date filter is applied inside the FILTER clauses so the LEFT JOIN keeps
     # points with zero matching events (not filtered out by a WHERE clause).
     def stats_by_point
-      dsql = date_filter_sql_fragment
+      dsql      = date_filter_sql_fragment
+      entry_sql = entry_events_sql
+      conv_sql  = conversion_events_sql
 
       rows = @project.geo_points
         .select(
           "geo_points.id",
           "geo_points.name",
-          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'radius_enter'#{dsql}) AS radius_entries",
-          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type = 'point_click'#{dsql}) AS clicks",
-          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'radius_enter'#{dsql}) AS unique_enterers",
-          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type = 'point_click'#{dsql}) AS unique_clickers",
+          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type IN (#{entry_sql})#{dsql}) AS radius_entries",
+          "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type IN (#{conv_sql})#{dsql}) AS clicks",
+          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type IN (#{entry_sql})#{dsql}) AS unique_enterers",
+          "COUNT(DISTINCT analytics_events.session_id) FILTER (WHERE analytics_events.event_type IN (#{conv_sql})#{dsql}) AS unique_clickers",
         )
         .left_joins(:analytics_events)
         .group("geo_points.id", "geo_points.name")
@@ -222,7 +224,7 @@ module Api
       clicks = point_scoped_events
       return if performed?
 
-      clicks = clicks.where(event_type: "point_click")
+      clicks = clicks.where(event_type: AnalyticsEvent::CONVERSION_EVENTS)
       total  = clicks.count
 
       contextual = clicks.where.not(context_metadata: nil)
@@ -322,7 +324,7 @@ module Api
           "COUNT(analytics_events.id) AS entry_count"
         )
         .left_joins(:analytics_events)
-        .where("analytics_events.id IS NULL OR analytics_events.event_type = 'radius_enter'")
+        .where("analytics_events.id IS NULL OR analytics_events.event_type IN (#{entry_events_sql})")
         .group("geo_points.id", "geo_points.name", "geo_points.latitude", "geo_points.longitude")
         .order("geo_points.order")
 

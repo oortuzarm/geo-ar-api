@@ -19,6 +19,12 @@ class AnalyticsEvent < ApplicationRecord
   # NULL = legacy public event (created before source tracking was added).
   SOURCES = %w[public api smart_link].freeze
 
+  # Unified analytics groups — all access channels map to these two buckets so
+  # that Metrics (radiusEntries, clicks, conversion) reflects physical presence
+  # regardless of whether the user arrived via the map, API v1, or a Smart Link.
+  ENTRY_EVENTS      = %w[radius_enter presence.validated smart_link_validation_passed].freeze
+  CONVERSION_EVENTS = %w[point_click destination.delivered].freeze
+
   belongs_to :geo_project
   belongs_to :geo_point, optional: true
   belongs_to :api_credential, optional: true

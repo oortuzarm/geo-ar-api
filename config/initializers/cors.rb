@@ -14,6 +14,12 @@ LANDING_ORIGINS = [
   "https://www.ubyca.com"
 ].freeze
 
+# Smart Links redirect domain.
+# Credential-free; only the two public Smart Link endpoints are exposed.
+GO_ORIGINS = [
+  "https://go.ubyca.com"
+].freeze
+
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
   # Studio / dev — full access, credentials (session cookies) enabled.
   allow do
@@ -31,6 +37,16 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     resource "/api/plans",
              headers:     :any,
              methods:     %i[get options head],
+             credentials: false
+  end
+
+  # Smart Links redirect domain — public, credential-free.
+  # Covers GET (show) and POST (validate) for all Smart Link slugs.
+  allow do
+    origins(*GO_ORIGINS)
+    resource "/api/public/smart_links/*",
+             headers:     :any,
+             methods:     %i[get post options head],
              credentials: false
   end
 end
