@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_04_000004) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_04_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -303,6 +303,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000004) do
     t.string "name", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "slug", null: false
+    t.index ["slug"], name: "index_organizations_on_slug", unique: true
   end
 
   create_table "password_reset_tokens", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -374,9 +376,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000004) do
     t.jsonb "ui_config", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.uuid "organization_id", null: false
+    t.index ["organization_id", "slug"], name: "index_smart_links_on_organization_id_and_slug", unique: true
     t.index ["project_id"], name: "index_smart_links_on_project_id"
     t.index ["status"], name: "index_smart_links_on_status"
-    t.index ["user_id", "slug"], name: "index_smart_links_on_user_id_and_slug", unique: true
     t.index ["user_id"], name: "index_smart_links_on_user_id"
   end
 
@@ -440,6 +443,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000004) do
   add_foreign_key "smart_link_geo_points", "geo_points"
   add_foreign_key "smart_link_geo_points", "smart_links"
   add_foreign_key "smart_links", "geo_projects", column: "project_id"
+  add_foreign_key "smart_links", "organizations"
   add_foreign_key "smart_links", "users"
   add_foreign_key "users", "onboarding_categories", on_delete: :nullify
   add_foreign_key "users", "onboarding_options", column: "onboarding_industry_id", on_delete: :nullify

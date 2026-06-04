@@ -1,28 +1,25 @@
 module Api
   module Public
     # Public Smart Links endpoints — no authentication required.
+    # Smart Links are resolved by organization_slug + slug.
     class SmartLinksController < ApplicationController
-      # GET /api/public/smart_links/:slug
-      # Returns minimal data to render the loading screen.
-      # Records a smart_link_opened analytics event.
+      # GET /api/public/smart_links/:organization_slug/:slug
       def show
-        smart_link = SmartLink.find_by!(slug: params[:slug])
+        smart_link = resolve_smart_link!
 
         unless smart_link.status == "active"
           return render json: { error: "Smart Link no disponible." }, status: :not_found
         end
 
-        record_event("smart_link_opened", smart_link, geo_point_id: nil)
-
+        record_event("smart_link_opened", smart_link)
         render json: smart_link.as_public_json
       rescue ActiveRecord::RecordNotFound
         render json: { error: "Smart Link no encontrado." }, status: :not_found
       end
 
-      # POST /api/public/smart_links/:slug/validate
-      # Body: { latitude, longitude, session_id, accuracy?, dwell_elapsed_seconds? }
+      # POST /api/public/smart_links/:organization_slug/:slug/validate
       def validate
-        smart_link = SmartLink.find_by!(slug: params[:slug])
+        smart_link = resolve_smart_link!
 
         unless smart_link.status == "active"
           return render json: {
@@ -69,6 +66,11 @@ module Api
 
       private
 
+      def resolve_smart_link!
+        org = Organization.find_by!(slug: params[:organization_slug])
+        org.smart_links.find_by!(slug: params[:slug])
+      end
+
       def valid_coordinates?
         numeric?(params[:latitude]) && numeric?(params[:longitude])
       end
@@ -81,15 +83,20 @@ module Api
         false
       end
 
-      def record_event(event_type, smart_link, geo_point_id: nil)
+      def record_event(event_type, smart_link)
         AnalyticsEvent.create!(
           geo_project_id:   smart_link.project_id,
-          geo_point_id:     geo_point_id,
+          geo_point_id:     nil,
           event_type:       event_type,
           session_id:       params[:session_id].presence || SecureRandom.uuid,
           event_date:       Date.current,
           source:           "smart_link",
-          context_metadata: { smart_link_id: smart_link.id, smart_link_slug: smart_link.slug }
+          context_metadata: {
+            smart_link_id:     smart_link.id,
+            smart_link_slug:   smart_link.slug,
+            organization_id:   smart_link.organization_id,
+            organization_slug: smart_link.organization.slug
+          }
         )
       rescue => e
         Rails.logger.error "[SMART_LINK] #{event_type} event failed: #{e.class}: #{e.message}"

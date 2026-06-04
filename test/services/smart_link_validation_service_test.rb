@@ -1,13 +1,14 @@
 require "test_helper"
 
 class SmartLinkValidationServiceTest < ActiveSupport::TestCase
-  # Point at origin with 100m radius — user at same coords is always inside.
   LAT = -33.437
   LNG = -70.650
 
   setup do
     @user    = User.create!(email: "svc_sl_#{SecureRandom.hex(4)}@example.com",
                              password: "pw", role: "user", status: "active")
+    @org     = Organization.create!(name: "Test Org #{SecureRandom.hex(4)}")
+    Membership.create!(user: @user, organization: @org, role: "owner")
     @project = GeoProject.create!(title: "Test", status: "active", user: @user)
     @point   = GeoPoint.create!(
       geo_project:       @project,
@@ -18,6 +19,7 @@ class SmartLinkValidationServiceTest < ActiveSupport::TestCase
     )
     @smart_link = SmartLink.create!(
       user:            @user,
+      organization:    @org,
       project:         @project,
       name:            "Test Link",
       destination_url: "https://example.com/destination",
@@ -33,6 +35,8 @@ class SmartLinkValidationServiceTest < ActiveSupport::TestCase
     SmartLink.delete_all
     GeoPoint.delete_all
     GeoProject.delete_all
+    Membership.where(organization: @org).delete_all
+    Organization.where(id: @org.id).destroy_all
     User.where(email: @user.email).destroy_all
   end
 
@@ -53,11 +57,13 @@ class SmartLinkValidationServiceTest < ActiveSupport::TestCase
     refute AnalyticsEvent.exists?(event_type: "smart_link_redirected", source: "smart_link")
   end
 
-  test "analytics events include smart_link_id and slug in context_metadata" do
+  test "analytics events include org context in context_metadata" do
     call_service
     event = AnalyticsEvent.find_by(event_type: "smart_link_validation_passed")
     assert_equal @smart_link.id,   event.context_metadata["smart_link_id"]
     assert_equal @smart_link.slug, event.context_metadata["smart_link_slug"]
+    assert_equal @org.id,          event.context_metadata["organization_id"]
+    assert_equal @org.slug,        event.context_metadata["organization_slug"]
   end
 
   test "updates live_visit on success" do
@@ -136,7 +142,6 @@ class SmartLinkValidationServiceTest < ActiveSupport::TestCase
     GeoPointLiveVisit.create!(geo_project: @project, geo_point: @point,
                                session_id: "other-1", lat: LAT, lng: LNG,
                                inside_radius: true, last_seen_at: 5.seconds.ago)
-    # 1 active + 1 current = 2 < 3
     result = call_service
     refute result.allowed
     assert_equal "minimum_live_visits_not_reached", result.reason
@@ -150,12 +155,9 @@ class SmartLinkValidationServiceTest < ActiveSupport::TestCase
     @smart_link.update_column(:scope_type, "geo_points")
     @smart_link.smart_link_geo_points.create!(geo_point_id: other_point.id)
 
-    # User is at LAT/LNG — inside @point but NOT inside other_point.
-    # Since only other_point is associated, result should be outside_boundary.
     result = call_service
     refute result.allowed
     assert_equal "outside_boundary", result.reason
-    # Let teardown delete SmartLinkGeoPoint before GeoPoint to avoid FK violation.
   end
 
   test "scope geo_points returns allowed when user is inside associated point" do

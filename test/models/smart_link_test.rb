@@ -4,6 +4,7 @@ class SmartLinkTest < ActiveSupport::TestCase
   setup do
     @user    = User.create!(email: "sl_test_#{SecureRandom.hex(4)}@example.com",
                              password: "password123", role: "user", status: "active")
+    @org     = Organization.create!(name: "Test Org #{SecureRandom.hex(4)}")
     @project = GeoProject.create!(title: "Test Project", status: "active", user: @user)
     @point   = GeoPoint.create!(geo_project: @project, latitude: -33.437, longitude: -70.650)
   end
@@ -13,6 +14,7 @@ class SmartLinkTest < ActiveSupport::TestCase
     SmartLink.delete_all
     GeoPoint.delete_all
     GeoProject.delete_all
+    Organization.where(id: @org.id).destroy_all
     User.where(email: @user.email).destroy_all
   end
 
@@ -83,19 +85,21 @@ class SmartLinkTest < ActiveSupport::TestCase
     assert link.errors[:status].any?
   end
 
-  test "slug must be unique within the same user" do
+  # ── Slug uniqueness ────────────────────────────────────────────────────────
+
+  test "slug must be unique within same organization" do
     build_link(slug: "my-slug").save!
     duplicate = build_link(slug: "my-slug")
     refute duplicate.valid?
     assert duplicate.errors[:slug].any?
   end
 
-  test "same slug is allowed for different users" do
+  test "same slug is allowed for different organizations" do
     build_link(slug: "my-slug").save!
-    other_user = User.create!(email: "other_#{SecureRandom.hex(4)}@example.com",
-                               password: "pw", role: "user", status: "active")
+    other_org  = Organization.create!(name: "Other Org #{SecureRandom.hex(4)}")
     other_link = SmartLink.new(
-      user:            other_user,
+      user:            @user,
+      organization:    other_org,
       project:         @project,
       name:            "Other Link",
       slug:            "my-slug",
@@ -104,7 +108,7 @@ class SmartLinkTest < ActiveSupport::TestCase
       status:          "active"
     )
     assert other_link.valid?
-    User.where(email: other_user.email).destroy_all
+    other_org.destroy
   end
 
   # ── scope_type = geo_points requires associations ─────────────────────────
@@ -123,18 +127,25 @@ class SmartLinkTest < ActiveSupport::TestCase
 
   # ── Serialization ─────────────────────────────────────────────────────────
 
+  test "as_api_json includes organizationSlug and publicUrl" do
+    link = build_link.tap(&:save!)
+    json = link.as_api_json
+    assert_equal @org.slug, json[:organizationSlug]
+    assert_equal "https://go.ubyca.com/#{@org.slug}/#{link.slug}", json[:publicUrl]
+  end
+
   test "as_api_json includes expected keys" do
     link = build_link.tap(&:save!)
     json = link.as_api_json
-    %i[id name slug scopeType destinationType destinationUrl status projectId
-       geoPointIds uiConfig createdAt updatedAt].each do |key|
+    %i[id name slug organizationSlug publicUrl scopeType destinationType destinationUrl
+       status projectId geoPointIds uiConfig createdAt updatedAt].each do |key|
       assert json.key?(key), "missing key :#{key}"
     end
   end
 
-  test "as_public_json includes only name, slug, status" do
+  test "as_public_json includes name, slug, organizationSlug, status" do
     json = build_link.tap(&:save!).as_public_json
-    assert_equal %w[name slug status].sort, json.keys.map(&:to_s).sort
+    assert_equal %w[name organizationSlug slug status].sort, json.keys.map(&:to_s).sort
   end
 
   private
@@ -142,6 +153,7 @@ class SmartLinkTest < ActiveSupport::TestCase
   def build_link(**attrs)
     SmartLink.new({
       user:            @user,
+      organization:    @org,
       project:         @project,
       name:            "Test Link",
       destination_url: "https://example.com",

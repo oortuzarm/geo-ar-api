@@ -4,6 +4,8 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
   setup do
     @user    = User.create!(email: "sl_ctrl_#{SecureRandom.hex(4)}@example.com",
                              password: "password123", role: "user", status: "active")
+    @org     = Organization.create!(name: "Test Org #{SecureRandom.hex(4)}")
+    Membership.create!(user: @user, organization: @org, role: "owner")
     @project = GeoProject.create!(title: "Test", status: "active", user: @user)
     @point   = GeoPoint.create!(geo_project: @project, latitude: -33.437, longitude: -70.650)
 
@@ -17,6 +19,8 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
     SmartLink.delete_all
     GeoPoint.delete_all
     GeoProject.delete_all
+    Membership.where(organization: @org).delete_all
+    Organization.where(id: @org.id).destroy_all
     User.where(email: @user.email).destroy_all
   end
 
@@ -36,7 +40,7 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
     assert_equal [], response.parsed_body
   end
 
-  test "index: returns user's non-archived links" do
+  test "index: returns organization's non-archived links" do
     create_link(slug: "link-a", status: "active")
     create_link(slug: "link-b", status: "paused")
     create_link(slug: "link-c", status: "archived")
@@ -45,40 +49,52 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
     assert_equal 2, response.parsed_body.size
   end
 
-  test "index: does not return other user's links" do
-    other = User.create!(email: "other_#{SecureRandom.hex(4)}@example.com", password: "pw",
-                          role: "user", status: "active")
-    SmartLink.create!(user: other, project: @project, name: "Other",
-                      destination_url: "https://x.com", scope_type: "project", status: "active")
+  test "index: does not return other organization's links" do
+    other_org  = Organization.create!(name: "Other #{SecureRandom.hex(4)}")
+    other_user = User.create!(email: "other_#{SecureRandom.hex(4)}@example.com",
+                               password: "pw", role: "user", status: "active")
+    Membership.create!(user: other_user, organization: other_org, role: "owner")
+    SmartLink.create!(user: other_user, organization: other_org, project: @project,
+                      name: "Other", destination_url: "https://x.com",
+                      scope_type: "project", status: "active")
     get "/api/smart_links"
     assert_response :ok
     assert_equal 0, response.parsed_body.size
-    User.where(email: other.email).destroy_all
+    SmartLink.where(organization: other_org).delete_all
+    Membership.where(organization: other_org).delete_all
+    other_org.destroy
+    User.where(email: other_user.email).destroy_all
   end
 
   # ── GET /api/smart_links/:id ───────────────────────────────────────────────
 
-  test "show: returns link by id" do
+  test "show: returns link by id including organizationSlug and publicUrl" do
     link = create_link
     get "/api/smart_links/#{link.id}"
     assert_response :ok
-    assert_equal link.slug, response.parsed_body["slug"]
+    body = response.parsed_body
+    assert_equal link.slug,  body["slug"]
+    assert_equal @org.slug,  body["organizationSlug"]
+    assert_equal "https://go.ubyca.com/#{@org.slug}/#{link.slug}", body["publicUrl"]
   end
 
-  test "show: returns 404 for another user's link" do
-    other = User.create!(email: "other2_#{SecureRandom.hex(4)}@example.com", password: "pw",
-                          role: "user", status: "active")
-    other_link = SmartLink.create!(user: other, project: @project, name: "Other",
-                                    destination_url: "https://x.com",
+  test "show: returns 404 for another organization's link" do
+    other_org  = Organization.create!(name: "Other #{SecureRandom.hex(4)}")
+    other_user = User.create!(email: "other2_#{SecureRandom.hex(4)}@example.com",
+                               password: "pw", role: "user", status: "active")
+    other_link = SmartLink.create!(user: other_user, organization: other_org, project: @project,
+                                    name: "Other", destination_url: "https://x.com",
                                     scope_type: "project", status: "active")
     get "/api/smart_links/#{other_link.id}"
     assert_response :not_found
-    User.where(email: other.email).destroy_all
+    other_link.destroy
+    other_org.destroy
+    User.where(email: other_user.email).destroy_all
   end
 
   # ── POST /api/smart_links ──────────────────────────────────────────────────
 
-  test "create: creates a smart link with project scope" do
+  test "create: creates a smart link assigned to current organization" do
     assert_difference "SmartLink.count", 1 do
       post "/api/smart_links",
            params: {
@@ -91,9 +107,9 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
     end
     assert_response :created
     body = response.parsed_body
-    assert_equal "my-link", body["slug"]
-    assert_equal @project.id, body["projectId"]
-    assert_equal "project", body["scopeType"]
+    assert_equal @org.id,   SmartLink.last.organization_id
+    assert_equal @org.slug, body["organizationSlug"]
+    assert body["publicUrl"].include?(@org.slug)
   end
 
   test "create: generates slug from name automatically" do
@@ -121,7 +137,7 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
-  test "create: returns 404 for project not owned by user" do
+  test "create: returns 404 for project not accessible to user" do
     other_project = GeoProject.create!(title: "Other", status: "active")
     post "/api/smart_links",
          params: { name: "X", projectId: other_project.id, scopeType: "project",
@@ -159,8 +175,8 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
     patch "/api/smart_links/#{link.id}",
           params: { name: "Updated Name", destinationUrl: "https://updated.com" }, as: :json
     assert_response :ok
-    assert_equal "Updated Name", response.parsed_body["name"]
-    assert_equal "https://updated.com", response.parsed_body["destinationUrl"]
+    assert_equal "Updated Name",          response.parsed_body["name"]
+    assert_equal "https://updated.com",   response.parsed_body["destinationUrl"]
   end
 
   test "update: syncs geo_point_ids when provided" do
@@ -170,7 +186,6 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
           params: { geoPointIds: [new_point.id] }, as: :json
     assert_response :ok
     assert_equal [new_point.id], response.parsed_body["geoPointIds"]
-    # new_point is cleaned up by teardown (SmartLinkGeoPoint.delete_all before GeoPoint.delete_all)
   end
 
   # ── DELETE /api/smart_links/:id ────────────────────────────────────────────
@@ -195,6 +210,7 @@ class Api::SmartLinksControllerTest < ActionDispatch::IntegrationTest
                   scope_type: "project", geo_point_ids: [])
     link = SmartLink.new(
       user:             @user,
+      organization:     @org,
       project:          @project,
       name:             "Test Link",
       slug:             slug,

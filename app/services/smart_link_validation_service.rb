@@ -198,8 +198,10 @@ class SmartLinkValidationService
       source:           "smart_link",
       failure_reason:   failure_reason,
       context_metadata: {
-        smart_link_id:   @smart_link.id,
-        smart_link_slug: @smart_link.slug
+        smart_link_id:     @smart_link.id,
+        smart_link_slug:   @smart_link.slug,
+        organization_id:   @smart_link.organization_id,
+        organization_slug: @smart_link.organization.slug
       }
     )
   rescue => e

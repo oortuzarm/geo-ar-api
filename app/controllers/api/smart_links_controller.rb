@@ -1,6 +1,7 @@
 module Api
   # Studio CRUD for Smart Links — session-authenticated.
-  # Scoped to current_user (admins can access any link).
+  # Smart Links are scoped to the current user's organization.
+  # Admins can access any Smart Link globally.
   class SmartLinksController < ApplicationController
     before_action :authenticate_user!
     before_action :set_smart_link, only: %i[show update destroy]
@@ -9,7 +10,7 @@ module Api
     def index
       links = smart_links_scope
                 .where.not(status: "archived")
-                .includes(:smart_link_geo_points)
+                .includes(:smart_link_geo_points, :organization)
                 .order(created_at: :desc)
       render json: links.map(&:as_api_json)
     end
@@ -21,9 +22,14 @@ module Api
 
     # POST /api/smart_links
     def create
-      @smart_link = SmartLink.new(smart_link_params.merge(user_id: current_user.id))
+      org = current_organization
+      return render json: { error: "No perteneces a ninguna organización." }, status: :forbidden unless org
 
-      unless project_owned_by_user?(@smart_link.project_id)
+      @smart_link = SmartLink.new(
+        smart_link_params.merge(user_id: current_user.id, organization_id: org.id)
+      )
+
+      unless project_accessible?(smart_link_params[:project_id])
         return render json: { error: "Proyecto no encontrado." }, status: :not_found
       end
 
@@ -81,11 +87,18 @@ module Api
     private
 
     def set_smart_link
-      @smart_link = smart_links_scope.includes(:smart_link_geo_points).find(params[:id])
+      @smart_link = smart_links_scope
+                      .includes(:smart_link_geo_points, :organization)
+                      .find(params[:id])
     end
 
     def smart_links_scope
-      current_user.role == "admin" ? SmartLink : current_user.smart_links
+      if current_user.role == "admin"
+        SmartLink
+      else
+        org = current_organization
+        org ? org.smart_links : SmartLink.none
+      end
     end
 
     def smart_link_params
@@ -93,7 +106,7 @@ module Api
                     :destination_url, :status, ui_config: {})
     end
 
-    def project_owned_by_user?(project_id)
+    def project_accessible?(project_id)
       return true if current_user.role == "admin"
       current_user.geo_projects.exists?(id: project_id)
     end

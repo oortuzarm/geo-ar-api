@@ -54,9 +54,9 @@ Rails.application.routes.draw do
       post "geo_points/:id/live_visit", to: "live_visits#create"
       get "settings", to: "settings#index"
 
-      # Smart Links public endpoints
-      get  "smart_links/:slug",          to: "smart_links#show",     as: :smart_link
-      post "smart_links/:slug/validate", to: "smart_links#validate", as: :validate_smart_link
+      # Smart Links public endpoints — namespaced by organization slug
+      get  "smart_links/:organization_slug/:slug",          to: "smart_links#show",     as: :smart_link
+      post "smart_links/:organization_slug/:slug/validate", to: "smart_links#validate", as: :validate_smart_link
     end
 
     resources :geo_projects do
