@@ -142,8 +142,6 @@ class SmartLinkValidationService
 
     record_event("smart_link_validation_passed", geo_point_id: point.id,
                  geo_project_id: point.geo_project_id)
-    record_event("smart_link_redirected", geo_point_id: point.id,
-                 geo_project_id: point.geo_project_id)
 
     Result.new(
       allowed:              true,

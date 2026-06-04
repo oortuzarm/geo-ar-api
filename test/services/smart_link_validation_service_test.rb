@@ -46,12 +46,11 @@ class SmartLinkValidationServiceTest < ActiveSupport::TestCase
     assert_nil result.reason
   end
 
-  test "records smart_link_validation_passed and smart_link_redirected on success" do
+  test "records smart_link_validation_passed on success" do
     call_service
     assert AnalyticsEvent.exists?(event_type: "smart_link_validation_passed",
                                   source: "smart_link", geo_point_id: @point.id)
-    assert AnalyticsEvent.exists?(event_type: "smart_link_redirected",
-                                  source: "smart_link", geo_point_id: @point.id)
+    refute AnalyticsEvent.exists?(event_type: "smart_link_redirected", source: "smart_link")
   end
 
   test "analytics events include smart_link_id and slug in context_metadata" do

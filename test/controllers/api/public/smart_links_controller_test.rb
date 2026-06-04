@@ -99,7 +99,7 @@ class Api::Public::SmartLinksControllerTest < ActionDispatch::IntegrationTest
   test "validate: records analytics events on success" do
     post_validate
     assert AnalyticsEvent.exists?(event_type: "smart_link_validation_passed", source: "smart_link")
-    assert AnalyticsEvent.exists?(event_type: "smart_link_redirected",         source: "smart_link")
+    refute AnalyticsEvent.exists?(event_type: "smart_link_redirected",         source: "smart_link")
   end
 
   test "validate: records failure event on denial" do

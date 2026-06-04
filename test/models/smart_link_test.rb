@@ -83,11 +83,28 @@ class SmartLinkTest < ActiveSupport::TestCase
     assert link.errors[:status].any?
   end
 
-  test "slug must be unique" do
+  test "slug must be unique within the same user" do
     build_link(slug: "my-slug").save!
     duplicate = build_link(slug: "my-slug")
     refute duplicate.valid?
     assert duplicate.errors[:slug].any?
+  end
+
+  test "same slug is allowed for different users" do
+    build_link(slug: "my-slug").save!
+    other_user = User.create!(email: "other_#{SecureRandom.hex(4)}@example.com",
+                               password: "pw", role: "user", status: "active")
+    other_link = SmartLink.new(
+      user:            other_user,
+      project:         @project,
+      name:            "Other Link",
+      slug:            "my-slug",
+      destination_url: "https://example.com",
+      scope_type:      "project",
+      status:          "active"
+    )
+    assert other_link.valid?
+    User.where(email: other_user.email).destroy_all
   end
 
   # ── scope_type = geo_points requires associations ─────────────────────────

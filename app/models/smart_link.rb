@@ -15,7 +15,7 @@ class SmartLink < ApplicationRecord
   before_validation :generate_slug_from_name
 
   validates :name,             presence: true, length: { maximum: 255 }
-  validates :slug,             presence: true, uniqueness: true,
+  validates :slug,             presence: true, uniqueness: { scope: :user_id },
                                format: { with: /\A[a-z0-9\-]+\z/,
                                          message: "solo puede contener letras minúsculas, números y guiones" }
   validates :scope_type,       inclusion: { in: SCOPE_TYPES }
