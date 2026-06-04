@@ -140,6 +140,40 @@ module GeoEngine
       result
     end
 
+    # ── Live Visits ───────────────────────────────────────────────────────────
+
+    def live_visits_enabled?(location)
+      av = location.availability || {}
+      av["live_visits_enabled"] == true
+    end
+
+    def live_visits_minimum(location)
+      av = location.availability || {}
+      av["live_visits_minimum"].to_i
+    end
+
+    # Returns the count of currently-active visitors inside the area.
+    # A visit is active when inside_radius=true and last_seen_at is within ACTIVE_WINDOW.
+    def live_visits_count(location)
+      GeoPointLiveVisit
+        .where(geo_point_id: location.id)
+        .inside_radius
+        .active_now
+        .count
+    end
+
+    # Returns true if the condition is met: current visitors + the person now
+    # attempting access >= configured minimum.
+    # Pass include_current_user: false only when displaying the raw count.
+    def live_visits_available?(location, include_current_user: true)
+      return true unless live_visits_enabled?(location)
+      minimum = live_visits_minimum(location)
+      return true if minimum <= 0
+      current   = live_visits_count(location)
+      effective = include_current_user ? current + 1 : current
+      effective >= minimum
+    end
+
     private
 
     def polygon_contains?(rings, x, y)

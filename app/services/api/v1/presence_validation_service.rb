@@ -38,6 +38,7 @@ module Api
         @context               = context || {}
         @credential            = credential
         @dry_run               = dry_run
+        @live_visits_metadata  = {}
       end
 
       def call
@@ -67,7 +68,23 @@ module Api
         checks[:quota_remaining] = GeoEngine.quota_remaining(@location)
         return failure(checks, "quota_exhausted") unless checks[:quota_available]
 
-        # ── Step 5: Dwell ──────────────────────────────────────────────────
+        # ── Step 5: Live visits minimum ────────────────────────────────────────
+        checks[:live_visits_enabled] = GeoEngine.live_visits_enabled?(@location)
+        if checks[:live_visits_enabled]
+          current_count = GeoEngine.live_visits_count(@location)
+          minimum       = GeoEngine.live_visits_minimum(@location)
+          checks[:live_visits_required] = minimum
+          checks[:live_visits_current]  = current_count
+          checks[:live_visits_met]      = (current_count + 1) >= minimum
+          unless checks[:live_visits_met]
+            @live_visits_metadata = { current_live_visits: current_count, required_live_visits: minimum }
+            return failure(checks, "minimum_live_visits_not_reached")
+          end
+        else
+          checks[:live_visits_met] = true
+        end
+
+        # ── Step 6: Dwell ──────────────────────────────────────────────────
         checks[:dwell_required] = @location.requires_dwell_time
 
         if @location.requires_dwell_time
@@ -140,6 +157,8 @@ module Api
       # Writes analytics events for the validation result.
       # Returns the ID of the primary presence.validated event.
       def record_events(success:, destination: nil, failure_reason: nil)
+        merged_metadata = (@context[:metadata].presence || {}).merge(@live_visits_metadata).presence
+
         base_attrs = {
           geo_project_id:    @location.geo_project_id,
           geo_point_id:      @location.id,
@@ -150,7 +169,7 @@ module Api
           source:            "api",
           api_credential_id: @credential.id,
           user_ref:          @context[:user_ref],
-          context_metadata:  @context[:metadata].presence
+          context_metadata:  merged_metadata
         }
 
         primary = AnalyticsEvent.create!(

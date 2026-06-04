@@ -11,10 +11,11 @@ module Api
       end
 
       # POST /api/public/geo_projects/:geo_project_id/geo_points/:id/access
-      # Body: { latitude:, longitude:, local_day?: "Lun", local_time?: "09:30" }
+      # Body: { latitude:, longitude:, session_id?: String, local_day?: "Lun", local_time?: "09:30" }
       def access
-        lat = params[:latitude].to_f
-        lng = params[:longitude].to_f
+        lat        = params[:latitude].to_f
+        lng        = params[:longitude].to_f
+        session_id = params[:session_id].presence || SecureRandom.uuid
 
         Rails.logger.info "[ACCESS] ── START ──────────────────────────────────────"
         Rails.logger.info "[ACCESS] project_id=#{@project.id} point_id=#{@point.id}"
@@ -46,14 +47,33 @@ module Api
         if GeoEngine.quota_active?(@point)
           av = @point.availability || {}
           Rails.logger.info "[ACCESS] quota active limit=#{av["quota_limit"]} used=#{av["quota_used"]}"
-          unless GeoEngine.consume_quota!(@point)
+          unless GeoEngine.quota_available?(@point)
             Rails.logger.info "[ACCESS] DENY reason=quota exhausted"
             return render_deny("No quedan cupos disponibles")
           end
-          Rails.logger.info "[ACCESS] quota consumed ok"
         else
           Rails.logger.info "[ACCESS] quota not active — skipping"
         end
+
+        if GeoEngine.live_visits_enabled?(@point)
+          current_count = GeoEngine.live_visits_count(@point)
+          minimum       = GeoEngine.live_visits_minimum(@point)
+          unless (current_count + 1) >= minimum
+            Rails.logger.info "[ACCESS] DENY reason=live_visits current=#{current_count} minimum=#{minimum}"
+            return render_deny("Se requiere un mínimo de #{minimum} personas en el área para acceder")
+          end
+          Rails.logger.info "[ACCESS] live_visits ok current=#{current_count} minimum=#{minimum}"
+        end
+
+        if GeoEngine.quota_active?(@point)
+          unless GeoEngine.consume_quota!(@point)
+            Rails.logger.info "[ACCESS] DENY reason=quota exhausted (race)"
+            return render_deny("No quedan cupos disponibles")
+          end
+          Rails.logger.info "[ACCESS] quota consumed ok"
+        end
+
+        upsert_live_visit(session_id, lat, lng)
 
         ct = @point.content_type.presence || "url"
         cd = @point.content_data.presence || {}
@@ -136,6 +156,23 @@ module Api
 
       def render_deny(message)
         render json: { success: false, message: }, status: :unprocessable_entity
+      end
+
+      def upsert_live_visit(session_id, lat, lng)
+        visit = GeoPointLiveVisit.find_or_initialize_by(
+          geo_point_id: @point.id,
+          session_id:   session_id
+        )
+        visit.assign_attributes(
+          geo_project_id: @project.id,
+          lat:            lat,
+          lng:            lng,
+          inside_radius:  true,
+          last_seen_at:   Time.current
+        )
+        visit.save!
+      rescue => e
+        Rails.logger.warn "[ACCESS] Live visit upsert failed: #{e.class}: #{e.message}"
       end
     end
   end

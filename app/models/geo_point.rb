@@ -21,6 +21,7 @@ class GeoPoint < ApplicationRecord
 
   validates :dwell_time_seconds, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate  :dwell_time_required_when_enabled
+  validate  :live_visits_minimum_when_enabled
   validate  :content_data_matches_schema
 
   validates :name,         length: { maximum: 255  }, allow_nil: true
@@ -161,6 +162,14 @@ class GeoPoint < ApplicationRecord
     return if dwell_time_seconds.to_i > 0
 
     errors.add(:dwell_time_seconds, "debe ser mayor a 0 cuando se requiere permanencia")
+  end
+
+  def live_visits_minimum_when_enabled
+    av = availability || {}
+    return unless av["live_visits_enabled"] == true
+    return if av["live_visits_minimum"].to_i >= 1
+
+    errors.add(:availability, "live_visits_minimum debe ser mayor a 0 cuando el mínimo de visitas está activado")
   end
 
   # JSONB availability is stored in snake_case (normalize_params converts keys on ingest).

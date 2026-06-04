@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_03_000001) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_03_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -71,6 +71,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_03_000001) do
     t.datetime "last_seen_at", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.index ["geo_point_id", "inside_radius", "last_seen_at"], name: "idx_live_visits_active"
     t.index ["geo_point_id", "session_id"], name: "index_geo_point_live_visits_on_geo_point_id_and_session_id", unique: true
     t.index ["geo_project_id"], name: "index_geo_point_live_visits_on_geo_project_id"
     t.index ["inside_radius"], name: "index_geo_point_live_visits_on_inside_radius"
