@@ -1,17 +1,13 @@
 # Validates whether a Smart Link can be unlocked for a given user location.
 #
-# Reuses GeoEngine exclusively — no parallel validation logic here.
-# Any new rule added to GeoEngine is automatically inherited by Smart Links.
-#
-# Evaluation order per candidate geo_point:
-#   1. inside_boundary?  (pre-filter — only candidates inside the area proceed)
-#   2. schedule_active?
-#   3. quota_available?
-#   4. live_visits_available?
-#   5. dwell_time_met?
-#
-# On success: consumes quota + updates live_visit + records analytics events.
-# On failure: records smart_link_validation_failed.
+# Availability evaluation per candidate point is fully delegated to
+# GeoPointAvailabilityChecker — this service owns only Smart-Link-specific
+# concerns:
+#   - candidate resolution (scope_type project / geo_points)
+#   - proximity ranking
+#   - outside-all-boundaries detection
+#   - analytics event recording (smart_link_*)
+#   - destination_url and organisation context in the response
 class SmartLinkValidationService
   Result = Struct.new(
     :allowed,
@@ -62,24 +58,41 @@ class SmartLinkValidationService
       })
     end
 
-    last_failure_reason     = nil
-    last_failure_availability = {}
+    last_check = nil
 
     inside.each do |point, _|
-      check = evaluate_point(point)
-      if check[:passed]
-        return handle_success(point)
+      check = GeoPointAvailabilityChecker.new(
+        geo_point:             point,
+        lat:                   @lat,
+        lng:                   @lng,
+        session_id:            @session_id,
+        accuracy:              @accuracy,
+        dwell_elapsed_seconds: @dwell_elapsed_seconds
+      ).call
+
+      if check.passed
+        # Checker already consumed quota + upserted live_visit.
+        record_event("smart_link_validation_passed", geo_point_id: point.id,
+                     geo_project_id: point.geo_project_id)
+        return Result.new(
+          allowed:              true,
+          destination_url:      @smart_link.destination_url,
+          matched_geo_point_id: point.id,
+          reason:               nil,
+          message:              nil,
+          availability:         {}
+        )
       end
-      last_failure_reason      = check[:failure_reason]
-      last_failure_availability = check.reject { |k, _| k == :passed || k == :failure_reason }
+
+      last_check = check
     end
 
-    fail_result(last_failure_reason, last_failure_availability)
+    fail_result(last_check.reason, last_check.availability)
   end
 
   private
 
-  # ── Candidate resolution ───────────────────────────────────────────────────
+  # ── Candidate resolution ──────────────────────────────────────────────────
 
   def resolve_candidates
     case @smart_link.scope_type
@@ -87,70 +100,6 @@ class SmartLinkValidationService
     when "geo_points" then @smart_link.geo_points.where(active: true).to_a
     else []
     end
-  end
-
-  # ── Per-point evaluation (no side effects) ────────────────────────────────
-
-  def evaluate_point(point)
-    return { passed: false, failure_reason: "location_inactive" } unless point.active
-
-    unless GeoEngine.schedule_active?(point)
-      return { passed: false, failure_reason: "outside_schedule" }
-    end
-
-    unless GeoEngine.quota_available?(point)
-      return { passed: false, failure_reason: "quota_exhausted", quota_remaining: 0 }
-    end
-
-    if GeoEngine.live_visits_enabled?(point)
-      current_count = GeoEngine.live_visits_count(point)
-      minimum       = GeoEngine.live_visits_minimum(point)
-      unless (current_count + 1) >= minimum
-        return {
-          passed:                false,
-          failure_reason:        "minimum_live_visits_not_reached",
-          current_live_visits:   current_count,
-          required_live_visits:  minimum
-        }
-      end
-    end
-
-    if point.requires_dwell_time
-      if @dwell_elapsed_seconds.nil?
-        return { passed: false, failure_reason: "dwell_required",
-                 dwell_seconds: point.dwell_time_seconds }
-      elsif @dwell_elapsed_seconds.to_i < point.dwell_time_seconds
-        return { passed: false, failure_reason: "dwell_time_not_met",
-                 dwell_seconds:    point.dwell_time_seconds,
-                 elapsed_seconds:  @dwell_elapsed_seconds.to_i }
-      end
-    end
-
-    { passed: true }
-  end
-
-  # ── Success path ───────────────────────────────────────────────────────────
-
-  def handle_success(point)
-    if GeoEngine.quota_active?(point)
-      unless GeoEngine.consume_quota!(point)
-        return fail_result("quota_exhausted")
-      end
-    end
-
-    update_live_visit(point)
-
-    record_event("smart_link_validation_passed", geo_point_id: point.id,
-                 geo_project_id: point.geo_project_id)
-
-    Result.new(
-      allowed:              true,
-      destination_url:      @smart_link.destination_url,
-      matched_geo_point_id: point.id,
-      reason:               nil,
-      message:              nil,
-      availability:         {}
-    )
   end
 
   # ── Failure path ──────────────────────────────────────────────────────────
@@ -168,25 +117,7 @@ class SmartLinkValidationService
     )
   end
 
-  # ── Side effects ──────────────────────────────────────────────────────────
-
-  def update_live_visit(point)
-    visit = GeoPointLiveVisit.find_or_initialize_by(
-      geo_point_id: point.id,
-      session_id:   @session_id
-    )
-    visit.assign_attributes(
-      geo_project_id: point.geo_project_id,
-      lat:            @lat,
-      lng:            @lng,
-      accuracy:       @accuracy,
-      inside_radius:  true,
-      last_seen_at:   Time.current
-    )
-    visit.save!
-  rescue => e
-    Rails.logger.warn "[SMART_LINK] Live visit update failed: #{e.class}: #{e.message}"
-  end
+  # ── Analytics ─────────────────────────────────────────────────────────────
 
   def record_event(event_type, geo_point_id: nil, geo_project_id: nil, failure_reason: nil)
     AnalyticsEvent.create!(
