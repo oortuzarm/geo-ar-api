@@ -2,7 +2,6 @@ class UpdateSmartLinksToOrganization < ActiveRecord::Migration[7.2]
   def up
     add_column :smart_links, :organization_id, :uuid
 
-    # Backfill: assign each smart_link the user's first organization.
     execute <<~SQL
       UPDATE smart_links sl
       SET organization_id = (
@@ -13,9 +12,18 @@ class UpdateSmartLinksToOrganization < ActiveRecord::Migration[7.2]
       )
     SQL
 
-    # Drop orphaned records (users with no organization).
-    execute "DELETE FROM smart_link_geo_points WHERE smart_link_id IN (SELECT id FROM smart_links WHERE organization_id IS NULL)"
-    execute "DELETE FROM smart_links WHERE organization_id IS NULL"
+    # Fail fast: never silently delete smart_links. Require human review.
+    orphan_count = SmartLink.where(organization_id: nil).count
+    if orphan_count > 0
+      raise "MIGRATION BLOCKED: #{orphan_count} smart_link(s) could not be assigned to an " \
+            "organization. Their owner users have no organization membership.\n\n" \
+            "  -- Find affected records:\n" \
+            "  SELECT sl.id, sl.user_id, sl.name\n" \
+            "  FROM smart_links sl\n" \
+            "  LEFT JOIN memberships m ON m.user_id = sl.user_id\n" \
+            "  WHERE m.id IS NULL;\n\n" \
+            "Assign the affected users to an organization, then retry."
+    end
 
     change_column_null :smart_links, :organization_id, false
 

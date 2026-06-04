@@ -2,7 +2,6 @@ class AddOrganizationToGeoProjects < ActiveRecord::Migration[7.2]
   def up
     add_column :geo_projects, :organization_id, :uuid
 
-    # Backfill from user→memberships: each project inherits its owner's first org.
     execute <<~SQL
       UPDATE geo_projects gp
       SET organization_id = (
@@ -14,13 +13,22 @@ class AddOrganizationToGeoProjects < ActiveRecord::Migration[7.2]
       WHERE gp.user_id IS NOT NULL
     SQL
 
-    # Remove projects that cannot be assigned to any organization (no user / no membership).
-    # In production this count should be zero; if not, the data must be reviewed.
+    # Fail fast: never silently delete geo_projects or geo_points.
+    # Projects with null user_id and projects from users with no membership
+    # both require manual assignment before this migration can complete.
     orphan_count = GeoProject.where(organization_id: nil).count
     if orphan_count > 0
-      Rails.logger.warn "[MIGRATION] #{orphan_count} geo_project(s) without organization — deleting."
-      GeoPoint.where(geo_project_id: GeoProject.where(organization_id: nil).select(:id)).delete_all
-      GeoProject.where(organization_id: nil).delete_all
+      raise "MIGRATION BLOCKED: #{orphan_count} geo_project(s) could not be assigned to an " \
+            "organization. This includes projects with no user_id and projects whose owner " \
+            "has no organization membership.\n\n" \
+            "  -- Projects with no user:\n" \
+            "  SELECT id, title FROM geo_projects WHERE user_id IS NULL;\n\n" \
+            "  -- Projects from users without organizations:\n" \
+            "  SELECT gp.id, gp.title, gp.user_id\n" \
+            "  FROM geo_projects gp\n" \
+            "  LEFT JOIN memberships m ON m.user_id = gp.user_id\n" \
+            "  WHERE gp.user_id IS NOT NULL AND m.id IS NULL;\n\n" \
+            "Assign a user and organization to each affected project, then retry."
     end
 
     change_column_null :geo_projects, :organization_id, false
