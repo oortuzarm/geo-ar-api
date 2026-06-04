@@ -5,14 +5,22 @@ class AnalyticsEvent < ApplicationRecord
   # API v1 event types — created by the presence validation engine.
   API_EVENT_TYPES = %w[presence.validated destination.delivered].freeze
 
-  EVENT_TYPES = (PUBLIC_EVENT_TYPES + API_EVENT_TYPES).freeze
+  # Smart Links event types — created server-side by SmartLinkValidationService.
+  # Not writable through the public analytics endpoint.
+  SMART_LINK_EVENT_TYPES = %w[smart_link_opened smart_link_validation_passed smart_link_validation_failed smart_link_redirected].freeze
+
+  EVENT_TYPES = (PUBLIC_EVENT_TYPES + API_EVENT_TYPES + SMART_LINK_EVENT_TYPES).freeze
+
+  # Subset writable through POST /api/analytics_events (public endpoint).
+  # Smart Link types are excluded — they are only created server-side.
+  PUBLIC_WRITABLE_EVENT_TYPES = (PUBLIC_EVENT_TYPES + API_EVENT_TYPES).freeze
 
   # Event source — identifies which surface created the event.
   # NULL = legacy public event (created before source tracking was added).
-  SOURCES = %w[public api].freeze
+  SOURCES = %w[public api smart_link].freeze
 
   belongs_to :geo_project
-  belongs_to :geo_point
+  belongs_to :geo_point, optional: true
   belongs_to :api_credential, optional: true
 
   validates :event_type, inclusion: { in: EVENT_TYPES }

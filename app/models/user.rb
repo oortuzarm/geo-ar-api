@@ -8,6 +8,7 @@ class User < ApplicationRecord
   belongs_to :onboarding_objective, optional: true, class_name: "OnboardingOption",  foreign_key: :onboarding_objective_id
 
   has_many :geo_projects,          dependent: :destroy
+  has_many :smart_links,           dependent: :destroy
   has_many :password_reset_tokens, dependent: :destroy
   has_many :memberships,           dependent: :destroy
   has_many :organizations,         through:   :memberships

@@ -29,8 +29,9 @@ module Api
       project_id = params[:project_id].to_s
       point_id   = params[:point_id].presence
 
-      # ── Validate event_type against model allowlist ──────────────────────────
-      unless AnalyticsEvent::EVENT_TYPES.include?(event_type)
+      # ── Validate event_type against public-writable allowlist ───────────────
+      # Smart Link event types are excluded — they are only created server-side.
+      unless AnalyticsEvent::PUBLIC_WRITABLE_EVENT_TYPES.include?(event_type)
         render json: { error: "Tipo de evento no válido." }, status: :unprocessable_entity
         return
       end

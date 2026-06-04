@@ -10,14 +10,14 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_03_000002) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_04_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
 
   create_table "analytics_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "geo_project_id", null: false
-    t.uuid "geo_point_id", null: false
+    t.uuid "geo_point_id"
     t.string "event_type", null: false
     t.string "session_id", null: false
     t.date "event_date", null: false
@@ -353,6 +353,33 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_03_000002) do
     t.index ["key"], name: "index_site_configs_on_key", unique: true
   end
 
+  create_table "smart_link_geo_points", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "smart_link_id", null: false
+    t.uuid "geo_point_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geo_point_id"], name: "index_smart_link_geo_points_on_geo_point_id"
+    t.index ["smart_link_id", "geo_point_id"], name: "index_smart_link_geo_points_on_smart_link_id_and_geo_point_id", unique: true
+  end
+
+  create_table "smart_links", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.uuid "project_id", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.string "scope_type", default: "project", null: false
+    t.string "destination_type", default: "external_url", null: false
+    t.string "destination_url"
+    t.string "status", default: "active", null: false
+    t.jsonb "ui_config", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_id"], name: "index_smart_links_on_project_id"
+    t.index ["slug"], name: "index_smart_links_on_slug", unique: true
+    t.index ["status"], name: "index_smart_links_on_status"
+    t.index ["user_id"], name: "index_smart_links_on_user_id"
+  end
+
   create_table "temporary_previews", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "token", null: false
     t.jsonb "payload", default: {}, null: false
@@ -410,6 +437,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_03_000002) do
   add_foreign_key "memberships", "organizations"
   add_foreign_key "memberships", "users"
   add_foreign_key "password_reset_tokens", "users"
+  add_foreign_key "smart_link_geo_points", "geo_points"
+  add_foreign_key "smart_link_geo_points", "smart_links"
+  add_foreign_key "smart_links", "geo_projects", column: "project_id"
+  add_foreign_key "smart_links", "users"
   add_foreign_key "users", "onboarding_categories", on_delete: :nullify
   add_foreign_key "users", "onboarding_options", column: "onboarding_industry_id", on_delete: :nullify
   add_foreign_key "users", "onboarding_options", column: "onboarding_objective_id", on_delete: :nullify

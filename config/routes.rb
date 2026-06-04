@@ -53,6 +53,10 @@ Rails.application.routes.draw do
       # Standalone heartbeat — not nested under geo_projects (no project context needed).
       post "geo_points/:id/live_visit", to: "live_visits#create"
       get "settings", to: "settings#index"
+
+      # Smart Links public endpoints
+      get  "smart_links/:slug",          to: "smart_links#show",     as: :smart_link
+      post "smart_links/:slug/validate", to: "smart_links#validate", as: :validate_smart_link
     end
 
     resources :geo_projects do
@@ -122,6 +126,9 @@ Rails.application.routes.draw do
     end
 
     resources :analytics_events, only: %i[create]
+
+    # Smart Links Studio CRUD
+    resources :smart_links
 
     # Standalone update/delete for geo_points
     # (frontend calls PUT /api/geo_points/:id and DELETE /api/geo_points/:id)
