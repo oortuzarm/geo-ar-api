@@ -41,10 +41,11 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
   end
 
   # Smart Links redirect domain — public, credential-free.
-  # Covers GET (show) and POST (validate) for all Smart Link slugs.
+  # Covers the entire /api/public/* namespace: Smart Link resolve + validate,
+  # geo_project show, geo_points index + access, and live_visit heartbeat.
   allow do
     origins(*GO_ORIGINS)
-    resource "/api/public/smart_links/*",
+    resource "/api/public/*",
              headers:     :any,
              methods:     %i[get post options head],
              credentials: false

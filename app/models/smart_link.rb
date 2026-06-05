@@ -46,7 +46,7 @@ class SmartLink < ApplicationRecord
   end
 
   def as_public_json
-    { name: name, slug: slug, organizationSlug: organization.slug, status: status }
+    { name: name, slug: slug, organizationSlug: organization.slug, status: status, projectId: project_id }
   end
 
   def public_url
