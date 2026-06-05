@@ -46,7 +46,15 @@ class SmartLink < ApplicationRecord
   end
 
   def as_public_json
-    { name: name, slug: slug, organizationSlug: organization.slug, status: status, projectId: project_id }
+    {
+      name:             name,
+      slug:             slug,
+      organizationSlug: organization.slug,
+      status:           status,
+      projectId:        project_id,
+      scopeType:        scope_type,
+      geoPointIds:      smart_link_geo_points.map(&:geo_point_id)
+    }
   end
 
   def public_url

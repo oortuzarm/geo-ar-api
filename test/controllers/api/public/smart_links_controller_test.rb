@@ -53,6 +53,34 @@ class Api::Public::SmartLinksControllerTest < ActionDispatch::IntegrationTest
     assert_equal "active",         body["status"]
   end
 
+  test "show: returns scopeType and geoPointIds" do
+    get show_url
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal "project", body["scopeType"]
+    assert_equal [],        body["geoPointIds"]
+  end
+
+  test "show: returns geoPointIds with exact selected point when scope_type is geo_points" do
+    link = SmartLink.create!(
+      user:            @user,
+      organization:    @org,
+      project:         @project,
+      name:            "Scoped Link",
+      slug:            "scoped-link-#{SecureRandom.hex(4)}",
+      destination_url: "https://example.com/dest",
+      scope_type:      "geo_points",
+      status:          "active"
+    )
+    SmartLinkGeoPoint.create!(smart_link: link, geo_point: @point)
+
+    get "/api/public/smart_links/#{@org.slug}/#{link.slug}"
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal "geo_points",  body["scopeType"]
+    assert_equal [ @point.id ], body["geoPointIds"]
+  end
+
   test "show: records smart_link_opened event with org context" do
     assert_difference "AnalyticsEvent.count", 1 do
       get show_url
