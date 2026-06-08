@@ -25,7 +25,13 @@ module Api
 
         return render_not_found unless smart_proxy
 
-        path    = params[:path].to_s
+        # Rails strips the file extension from *path and stores it in params[:format].
+        # Reconstruct the full path before passing it to the fetcher.
+        path = params[:path].to_s
+        path = "#{path}.#{params[:format]}" if params[:format].present?
+
+        Rails.logger.info "[SP_CTRL] reconstructed_path=#{path.inspect}"
+
         fetcher = SmartProxyFetcher.new(smart_proxy, path, request.base_url)
         result  = fetcher.call
 
