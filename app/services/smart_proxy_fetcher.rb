@@ -291,13 +291,16 @@ class SmartProxyFetcher
     source_uri  = URI.parse(source_url)
     base_origin = build_origin(source_uri)
 
-    # Log every <link rel="stylesheet"> BEFORE rewriting so we can compare with
-    # what the origin page sent vs what we serve to the browser.
+    # Collect and log stylesheet <link> tags BEFORE rewriting.
+    before_stylesheets = []
     html.scan(/<link\b[^>]*>/i) do |tag|
       next unless tag.match?(/\brel\s*=\s*["']?stylesheet["']?/i)
-      href = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)&.then { _1[2] }
-      Rails.logger.info "[SP_FETCHER] STYLESHEET_LINK original=#{href.inspect} tag=#{tag.gsub(/\s+/, " ").strip.inspect}"
+      href_m = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)
+      href   = href_m ? href_m[2] : nil
+      before_stylesheets << href
+      Rails.logger.info "[SP_FETCHER] STYLESHEET_LINK original=#{href.inspect}"
     end
+    Rails.logger.info "[SP_FETCHER] STYLESHEET_COUNT_BEFORE count=#{before_stylesheets.size}"
 
     # Remove <base> — the proxy URL must serve as the implicit base.
     html = html.gsub(/<base\b[^>]*>/i, "")
@@ -329,12 +332,25 @@ class SmartProxyFetcher
       "#{$1}#{rewrite_inline_urls($2, base_origin)}#{$3}"
     end
 
-    # Log every <link rel="stylesheet"> AFTER rewriting — compare with originals above.
-    html.scan(/<link\b[^>]*>/i) do |tag|
-      next unless tag.match?(/\brel\s*=\s*["']?stylesheet["']?/i)
-      href = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)&.then { _1[2] }
-      Rails.logger.info "[SP_FETCHER] STYLESHEET_REWRITTEN to=#{href.inspect}"
+    # Deduplicate and log stylesheet <link> tags AFTER rewriting.
+    # Keeps the first occurrence of each href; removes exact duplicates.
+    seen_hrefs = {}
+    html = html.gsub(/<link\b[^>]*>/i) do |tag|
+      next tag unless tag.match?(/\brel\s*=\s*["']?stylesheet["']?/i)
+      href_m = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)
+      href   = href_m ? href_m[2] : nil
+      next tag unless href  # no parseable href — leave the tag untouched
+
+      if seen_hrefs[href]
+        Rails.logger.warn "[SP_FETCHER] STYLESHEET_DUPLICATE href=#{href.inspect} (removed)"
+        ""
+      else
+        seen_hrefs[href] = true
+        Rails.logger.info "[SP_FETCHER] STYLESHEET_REWRITTEN to=#{href.inspect}"
+        tag
+      end
     end
+    Rails.logger.info "[SP_FETCHER] STYLESHEET_COUNT_AFTER count=#{seen_hrefs.size}"
 
     html
   end
