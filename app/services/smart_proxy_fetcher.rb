@@ -90,6 +90,7 @@ class SmartProxyFetcher
 
     # For static assets, check the server-side cache before hitting origin.
     if ext_mime
+      Rails.logger.info "[SP_FETCHER] CACHE_STORE_CLASS #{Rails.cache.class.name}"
       cached = load_from_cache(target_url)
       if cached
         Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_HIT target=#{target_url.inspect}"
@@ -135,7 +136,15 @@ class SmartProxyFetcher
 
     # Persist successful asset responses. Skip when origin returned an HTML error page
     # (empty body) and skip all HTML pages — those are never cached.
-    store_in_cache(target_url, result) if ext_mime && result.success && ct_base != "text/html"
+    if ext_mime && result.success && ct_base != "text/html"
+      store_in_cache(target_url, result)
+    else
+      Rails.logger.info "[SP_FETCHER] CACHE_SKIP_STORE " \
+                        "ext_mime=#{ext_mime.inspect} " \
+                        "success=#{result.success} " \
+                        "ct_base=#{ct_base.inspect} " \
+                        "target=#{target_url.inspect}"
+    end
 
     result
   rescue => e
@@ -373,22 +382,43 @@ class SmartProxyFetcher
   end
 
   def load_from_cache(target_url)
-    entry = Rails.cache.read(cache_key(target_url))
-    return nil unless entry
-    Result.new(success: true, body: entry[:body], content_type: entry[:content_type])
+    key = cache_key(target_url)
+    Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_READ key=#{key}"
+    entry = Rails.cache.read(key)
+    if entry
+      Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_READ_HIT key=#{key} " \
+                        "entry_keys=#{entry.keys.inspect} " \
+                        "body_bytes=#{entry[:body].to_s.bytesize} " \
+                        "ct=#{entry[:content_type].inspect}"
+      Result.new(success: true, body: entry[:body], content_type: entry[:content_type])
+    else
+      Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_READ_EMPTY key=#{key}"
+      nil
+    end
   rescue => e
-    Rails.logger.warn "[SP_FETCHER] cache read failed: #{e.message}"
+    Rails.logger.warn "[SP_FETCHER] SMART_PROXY_CACHE_READ_ERROR key=#{key} error=#{e.message}"
     nil
   end
 
   def store_in_cache(target_url, result)
-    Rails.cache.write(
-      cache_key(target_url),
+    key = cache_key(target_url)
+    Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_STORE key=#{key} " \
+                      "body_bytes=#{result.body.to_s.bytesize} " \
+                      "ct=#{result.content_type.inspect} " \
+                      "ttl=#{CACHE_TTL}"
+    ok = Rails.cache.write(
+      key,
       { body: result.body, content_type: result.content_type },
       expires_in: CACHE_TTL
     )
+    if ok
+      Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_STORE_OK key=#{key}"
+    else
+      Rails.logger.warn "[SP_FETCHER] SMART_PROXY_CACHE_STORE_FAILED key=#{key} " \
+                        "(write returned false — NullStore or size limit?)"
+    end
   rescue => e
-    Rails.logger.warn "[SP_FETCHER] cache write failed: #{e.message}"
+    Rails.logger.warn "[SP_FETCHER] SMART_PROXY_CACHE_STORE_ERROR key=#{key} error=#{e.message}"
   end
 
   def build_origin(uri)
