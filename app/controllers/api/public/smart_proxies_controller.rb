@@ -45,8 +45,16 @@ module Api
           mark_supported(smart_proxy)
           record_server_event("smart_proxy_fetch_success", smart_proxy, path) if path.blank?
 
-          response.headers["Cache-Control"] = "no-store"
-          response.headers["X-Robots-Tag"]  = "noindex, nofollow"
+          # HTML must not be cached — it contains the injected script and rewritten URLs.
+          # Static assets (CSS, JS, images, fonts, PDFs) are safe to cache publicly.
+          result_ct_base = result.content_type.to_s.split(";").first.strip.downcase
+          if result_ct_base == "text/html"
+            response.headers["Cache-Control"] = "no-store"
+          else
+            response.headers["Cache-Control"] = "public, max-age=3600"
+          end
+
+          response.headers["X-Robots-Tag"] = "noindex, nofollow"
           render body: result.body, content_type: result.content_type
         else
           mark_failed(smart_proxy)

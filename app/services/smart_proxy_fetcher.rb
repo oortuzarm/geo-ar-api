@@ -3,6 +3,7 @@ require "uri"
 require "openssl"
 require "zlib"
 require "stringio"
+require "digest"
 
 # Fetches a remote URL server-side, rewrites internal URLs so they route through
 # the proxy, and injects the Ubyca analytics script before </body>.
@@ -27,6 +28,7 @@ class SmartProxyFetcher
   CONNECT_TIMEOUT    = 10                # seconds
   READ_TIMEOUT       = 20                # seconds
   MAX_REDIRECTS      = 5
+  CACHE_TTL          = 1.hour
 
   HTML_TYPES = %w[text/html application/xhtml+xml].freeze
 
@@ -83,7 +85,18 @@ class SmartProxyFetcher
     end
 
     # Resolve expected MIME from URL extension BEFORE fetching.
+    # HTML pages have no known extension, so ext_mime is nil for them.
     ext_mime = asset_mime_for_url(target_url)
+
+    # For static assets, check the server-side cache before hitting origin.
+    if ext_mime
+      cached = load_from_cache(target_url)
+      if cached
+        Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_HIT target=#{target_url.inspect}"
+        return cached
+      end
+      Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_MISS target=#{target_url.inspect}"
+    end
 
     Rails.logger.info "[SP_FETCHER] FETCH target=#{target_url.inspect} " \
                       "ext_mime=#{ext_mime.inspect} " \
@@ -103,7 +116,7 @@ class SmartProxyFetcher
                       "ct_base=#{ct_base.inspect} " \
                       "target=#{target_url.inspect}"
 
-    if ext_mime
+    result = if ext_mime
       if ct_base == "text/html"
         Rails.logger.warn "[SP_FETCHER] ASSET_HTML_MISMATCH target=#{target_url.inspect} " \
                           "origin_ct=#{raw_ct.inspect} returning empty body with ext_mime=#{ext_mime.inspect}"
@@ -119,6 +132,12 @@ class SmartProxyFetcher
       Rails.logger.info "[SP_FETCHER] BINARY_OTHER target=#{target_url.inspect} ct=#{raw_ct.inspect}"
       serve_binary(response, raw_ct.presence || "application/octet-stream")
     end
+
+    # Persist successful asset responses. Skip when origin returned an HTML error page
+    # (empty body) and skip all HTML pages — those are never cached.
+    store_in_cache(target_url, result) if ext_mime && result.success && ct_base != "text/html"
+
+    result
   rescue => e
     Rails.logger.error "[SP_FETCHER] EXCEPTION #{e.class}: #{e.message}\n#{e.backtrace.first(3).join("\n")}"
     Result.new(success: false, error: "internal_error")
@@ -343,6 +362,33 @@ class SmartProxyFetcher
     ASSET_EXTENSIONS[ext]
   rescue
     nil
+  end
+
+  # ── Server-side asset cache ────────────────────────────────────────────────
+
+  def cache_key(target_url)
+    # Scoped by proxy so two proxies pointing to the same origin don't share entries
+    # (their @proxy_prefix rewrites would produce different body content).
+    "smart_proxy/v1/#{@smart_proxy.id}/#{Digest::SHA256.hexdigest(target_url)}"
+  end
+
+  def load_from_cache(target_url)
+    entry = Rails.cache.read(cache_key(target_url))
+    return nil unless entry
+    Result.new(success: true, body: entry[:body], content_type: entry[:content_type])
+  rescue => e
+    Rails.logger.warn "[SP_FETCHER] cache read failed: #{e.message}"
+    nil
+  end
+
+  def store_in_cache(target_url, result)
+    Rails.cache.write(
+      cache_key(target_url),
+      { body: result.body, content_type: result.content_type },
+      expires_in: CACHE_TTL
+    )
+  rescue => e
+    Rails.logger.warn "[SP_FETCHER] cache write failed: #{e.message}"
   end
 
   def build_origin(uri)
