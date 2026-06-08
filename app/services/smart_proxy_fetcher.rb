@@ -1,8 +1,10 @@
 require "net/http"
 require "uri"
 require "openssl"
+require "zlib"
+require "stringio"
 
-# Fetches a remote URL server-side, rewrites internal URLs so they go through
+# Fetches a remote URL server-side, rewrites internal URLs so they route through
 # the proxy, and injects the Ubyca analytics script before </body>.
 #
 # Security guardrails:
@@ -21,44 +23,42 @@ class SmartProxyFetcher
     /\Afd[0-9a-f]{2}:/i
   ].freeze
 
-  MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB
-  CONNECT_TIMEOUT    = 10               # seconds
-  READ_TIMEOUT       = 15               # seconds
-  MAX_REDIRECTS      = 3
+  MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB
+  CONNECT_TIMEOUT    = 10                # seconds
+  READ_TIMEOUT       = 20                # seconds
+  MAX_REDIRECTS      = 5
+
+  HTML_TYPES = %w[text/html application/xhtml+xml].freeze
+  CSS_TYPES  = %w[text/css].freeze
 
   Result = Struct.new(:success, :body, :content_type, :error, keyword_init: true)
 
   # @param smart_proxy [SmartProxy]
-  # @param path        [String]  sub-path from the request (e.g. "products/item")
-  # @param api_base    [String]  base URL of the Ubyca API (e.g. "https://go.ubyca.com")
+  # @param path        [String]  sub-path appended to destination_url
+  # @param api_base    [String]  base URL used by the injected analytics script
   def initialize(smart_proxy, path, api_base)
-    @smart_proxy = smart_proxy
-    @path        = path.to_s.delete_prefix("/")
-    @api_base    = api_base
+    @smart_proxy  = smart_proxy
+    @path         = path.to_s.delete_prefix("/")
+    @api_base     = api_base
     @proxy_prefix = smart_proxy.proxy_path_prefix
   end
 
   def call
     target_url = build_target_url
-    unless target_url
-      return Result.new(success: false, error: "invalid_destination_url")
-    end
+    return Result.new(success: false, error: "invalid_destination_url") unless target_url
 
     response = fetch_with_redirects(target_url)
-    unless response
-      return Result.new(success: false, error: "fetch_failed")
-    end
+    return Result.new(success: false, error: "fetch_failed") unless response
 
-    content_type = (response["content-type"] || "text/html").split(";").first.strip
+    raw_ct  = response["content-type"].to_s
+    ct_base = raw_ct.split(";").first.to_s.strip.downcase
 
-    if content_type == "text/html"
-      charset = extract_charset(response)
-      raw     = force_utf8(response.body, charset)
-      html    = rewrite_html(raw, target_url)
-      html    = inject_script(html)
-      Result.new(success: true, body: html, content_type: "text/html; charset=utf-8")
+    if HTML_TYPES.include?(ct_base)
+      serve_html(response, target_url)
+    elsif CSS_TYPES.include?(ct_base)
+      serve_css(response, target_url)
     else
-      Result.new(success: true, body: response.body, content_type: response["content-type"])
+      serve_binary(response, raw_ct)
     end
   rescue => e
     Rails.logger.error "[SMART_PROXY_FETCHER] #{e.class}: #{e.message}"
@@ -67,13 +67,245 @@ class SmartProxyFetcher
 
   private
 
+  # ── Content-type dispatch ──────────────────────────────────────────────────
+
+  def serve_html(response, target_url)
+    raw   = decompress(response)
+    # Charset: HTTP header takes priority; fall back to scanning meta tags.
+    cs    = extract_charset_from_header(response) || extract_charset_from_bytes(raw)
+    html  = decode_to_utf8(raw, cs)
+    html  = rewrite_html(html, target_url)
+    html  = strip_inline_csp(html)
+    html  = normalize_meta_charset(html)
+    html  = inject_script(html)
+    Result.new(success: true, body: html, content_type: "text/html; charset=utf-8")
+  end
+
+  def serve_css(response, target_url)
+    source_uri  = URI.parse(target_url)
+    base_origin = build_origin(source_uri)
+    raw         = decompress(response)
+    cs          = extract_charset_from_header(response)
+    css         = decode_to_utf8(raw, cs)
+    css         = rewrite_css(css, base_origin, source_uri)
+    Result.new(success: true, body: css, content_type: "text/css; charset=utf-8")
+  end
+
+  def serve_binary(response, raw_ct)
+    body = response.body.dup.force_encoding(Encoding::BINARY)
+    Result.new(
+      success:      true,
+      body:         body,
+      content_type: raw_ct.presence || "application/octet-stream"
+    )
+  end
+
+  # ── Encoding ───────────────────────────────────────────────────────────────
+
+  # Decompress gzip body if the server sent it despite Accept-Encoding: identity.
+  def decompress(response)
+    raw = response.body.dup.force_encoding(Encoding::BINARY)
+    return raw unless response["content-encoding"].to_s.downcase.include?("gzip")
+
+    Zlib::GzipReader.new(StringIO.new(raw)).read.force_encoding(Encoding::BINARY)
+  rescue => e
+    Rails.logger.warn "[SMART_PROXY_FETCHER] gzip decompress failed: #{e.message}"
+    raw
+  end
+
+  # Charset from HTTP Content-Type header, e.g. "text/html; charset=iso-8859-1".
+  def extract_charset_from_header(response)
+    m = response["content-type"].to_s.match(/charset\s*=\s*["']?([^"'\s;]+)/i)
+    m ? normalize_charset(m[1]) : nil
+  end
+
+  # Charset from the first 2 KB of the body (meta tags).
+  # Both UTF-8 and Latin-1 are ASCII-compatible in the ASCII range, so we can
+  # decode the snippet as BINARY→UTF-8 with replacement just to scan the text.
+  def extract_charset_from_bytes(raw_bytes)
+    snippet = raw_bytes[0, 2048].to_s
+              .encode("UTF-8", "BINARY", invalid: :replace, undef: :replace)
+
+    # <meta charset="iso-8859-1">  or  <meta charset=iso-8859-1>
+    m = snippet.match(/<meta\b[^>]*\bcharset\s*=\s*["']?([^"'\s;>]+)/i)
+    return normalize_charset(m[1]) if m
+
+    # <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+    m = snippet.match(/<meta\b[^>]*\bcontent\s*=\s*["'][^"']*charset\s*=\s*([^"'\s;>]+)/i)
+    m ? normalize_charset(m[1]) : nil
+  end
+
+  # Map common charset aliases to Ruby's Encoding names.
+  def normalize_charset(cs)
+    return nil unless cs
+    case cs.strip.upcase
+    when "UTF8"                             then "UTF-8"
+    when "LATIN-1", "LATIN1"               then "ISO-8859-1"
+    when "WIN-1252", "WINDOWS-1252", "CP1252" then "Windows-1252"
+    when "WIN-1251", "WINDOWS-1251", "CP1251" then "Windows-1251"
+    else cs.strip
+    end
+  end
+
+  # Convert BINARY-tagged bytes to UTF-8.
+  # body_bytes must be a BINARY (ASCII-8BIT) String — as returned by Net::HTTP streaming.
+  # charset is the source encoding name (Ruby-compatible), or nil to assume UTF-8.
+  def decode_to_utf8(body_bytes, charset)
+    charset ||= "UTF-8"
+    # force_encoding reinterprets the bytes without any conversion —
+    # it just changes the Ruby encoding tag so encode() knows what to convert FROM.
+    body_bytes.dup
+              .force_encoding(charset)
+              .encode("UTF-8", invalid: :replace, undef: :replace)
+  rescue => e
+    Rails.logger.warn "[SMART_PROXY_FETCHER] decode_to_utf8 (#{charset}): #{e.message}"
+    body_bytes.dup
+              .force_encoding(Encoding::BINARY)
+              .encode("UTF-8", "BINARY", invalid: :replace, undef: :replace)
+  end
+
+  # ── HTML rewriting ─────────────────────────────────────────────────────────
+
+  def rewrite_html(html, source_url)
+    source_uri  = URI.parse(source_url)
+    base_origin = build_origin(source_uri)
+
+    # Remove <base> — the proxy URL must serve as the implicit base.
+    html = html.gsub(/<base\b[^>]*>/i, "")
+
+    # Rewrite URL-bearing attributes.
+    # Covers standard attrs + common lazy-load patterns (data-src, data-bg, poster).
+    html = html.gsub(/(\s(?:href|src|action|data-src|data-bg|poster)\s*=\s*)(["'])(.*?)\2/im) do
+      "#{$1}#{$2}#{rewrite_url($3, base_origin, source_uri)}#{$2}"
+    end
+
+    # srcset / data-srcset: "url1 1x, url2 2x" or "url1 320w, url2 640w"
+    html = html.gsub(/(\s(?:srcset|data-srcset)\s*=\s*)(["'])(.*?)\2/im) do
+      "#{$1}#{$2}#{rewrite_srcset($3, base_origin, source_uri)}#{$2}"
+    end
+
+    # style="..." attributes — rewrite url() inside inline styles.
+    html = html.gsub(/(\bstyle\s*=\s*)(["'])(.*?)\2/im) do
+      "#{$1}#{$2}#{rewrite_css_urls($3, base_origin, source_uri)}#{$2}"
+    end
+
+    # <style>...</style> blocks.
+    html.gsub(/(<style\b[^>]*>)(.*?)(<\/style>)/im) do
+      "#{$1}#{rewrite_css_urls($2, base_origin, source_uri)}#{$3}"
+    end
+  end
+
+  def rewrite_url(url, base_origin, source_uri)
+    url = url.to_s.strip
+    return url if url.empty?
+    return url if url.start_with?("data:", "mailto:", "tel:", "javascript:", "#", "blob:")
+
+    if url.start_with?("//")
+      # Protocol-relative — treat as HTTPS for origin check.
+      u = URI.parse("https:#{url}") rescue nil
+      return url unless u
+      same_origin?(u, base_origin) ? proxy_path(u) : url
+
+    elsif url.start_with?("https://", "http://")
+      u = URI.parse(url) rescue nil
+      return url unless u
+      same_origin?(u, base_origin) ? proxy_path(u) : url
+
+    elsif url.start_with?("/")
+      "#{@proxy_prefix}#{url}"
+
+    else
+      # Relative URL (./path, ../path, or bare relative like "images/logo.png").
+      # Resolve against the source page URL so the browser doesn't have to —
+      # this avoids path-prefix ambiguity when the proxy root has no trailing slash.
+      u = URI.join(source_uri, url) rescue nil
+      return url unless u
+      same_origin?(u, base_origin) ? proxy_path(u) : u.to_s
+    end
+  end
+
+  def rewrite_srcset(srcset, base_origin, source_uri)
+    srcset.split(",").map do |entry|
+      parts    = entry.strip.split(/\s+/, 2)
+      parts[0] = rewrite_url(parts[0].to_s, base_origin, source_uri) if parts[0]
+      parts.join(" ")
+    end.join(", ")
+  end
+
+  # ── CSS rewriting ──────────────────────────────────────────────────────────
+
+  # Rewrite a complete CSS file: url() references and @import directives.
+  def rewrite_css(css, base_origin, source_uri)
+    css = rewrite_css_urls(css, base_origin, source_uri)
+
+    # @import "url"  or  @import 'url'  (without url() wrapper)
+    css.gsub(/@import\s+(["'])(.*?)\1/m) do
+      "@import #{$1}#{rewrite_url($2, base_origin, source_uri)}#{$1}"
+    end
+  end
+
+  # Rewrite url(...) occurrences in any CSS string (files, <style> blocks, inline styles).
+  # Handles quoted (single/double) and unquoted values.
+  def rewrite_css_urls(css, base_origin, source_uri)
+    css.gsub(/url\(\s*(["']?)(.*?)\1\s*\)/m) do
+      quote = $1
+      url   = $2.strip
+      "url(#{quote}#{rewrite_url(url, base_origin, source_uri)}#{quote})"
+    end
+  end
+
+  # ── HTML cleanup ───────────────────────────────────────────────────────────
+
+  # Strip inline Content-Security-Policy meta tags.
+  # The origin site's CSP would block the injected analytics script.
+  def strip_inline_csp(html)
+    html.gsub(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']?content-security-policy["']?\b[^>]*>/i, "")
+  end
+
+  # After converting to UTF-8, update any <meta charset> declarations so the
+  # browser's HTML parser doesn't re-interpret the page with the old encoding.
+  def normalize_meta_charset(html)
+    # <meta charset="...">
+    html = html.gsub(/<meta\b([^>]*)\bcharset\s*=\s*["']?[^"'\s;>]+["']?([^>]*)>/i) do
+      "<meta#{$1}charset=\"utf-8\"#{$2}>"
+    end
+
+    # <meta http-equiv="Content-Type" content="text/html; charset=...">
+    html.gsub(/(content\s*=\s*["'][^"']*)charset\s*=\s*[^"'\s;]+/i) do
+      "#{$1}charset=utf-8"
+    end
+  end
+
+  # ── URL helpers ────────────────────────────────────────────────────────────
+
+  def build_origin(uri)
+    o = "#{uri.scheme}://#{uri.host}"
+    o += ":#{uri.port}" unless default_port?(uri)
+    o
+  end
+
+  def proxy_path(uri)
+    "#{@proxy_prefix}#{uri.path}#{query_string(uri)}"
+  end
+
+  def same_origin?(uri, base_origin)
+    build_origin(uri) == base_origin
+  end
+
+  def default_port?(uri)
+    (uri.scheme == "https" && uri.port == 443) ||
+      (uri.scheme == "http"  && uri.port == 80)
+  end
+
+  def query_string(uri)
+    uri.query ? "?#{uri.query}" : ""
+  end
+
+  # ── HTTP ──────────────────────────────────────────────────────────────────
+
   def build_target_url
     base = @smart_proxy.destination_url.chomp("/")
-    if @path.present?
-      "#{base}/#{@path}"
-    else
-      base
-    end
+    @path.present? ? "#{base}/#{@path}" : base
   rescue
     nil
   end
@@ -86,11 +318,11 @@ class SmartProxyFetcher
     true
   end
 
-  def fetch_with_redirects(url, redirect_count = 0)
-    return nil if redirect_count > MAX_REDIRECTS
+  def fetch_with_redirects(url, count = 0)
+    return nil if count > MAX_REDIRECTS
 
-    uri = URI.parse(url)
-    return nil unless secure_uri?(uri)
+    uri = URI.parse(url) rescue nil
+    return nil unless uri && secure_uri?(uri)
 
     response = http_get(uri)
     return nil unless response
@@ -98,160 +330,68 @@ class SmartProxyFetcher
     if response.is_a?(Net::HTTPRedirection)
       location = response["location"].to_s.strip
       return nil if location.empty?
-      next_uri = location.start_with?("http") ? URI.parse(location) : URI.join(url, location)
-      fetch_with_redirects(next_uri.to_s, redirect_count + 1)
+      next_url = location.start_with?("http") ? location : URI.join(url, location).to_s
+      fetch_with_redirects(next_url, count + 1)
     else
       response
     end
   rescue URI::InvalidURIError => e
-    Rails.logger.warn "[SMART_PROXY_FETCHER] Invalid redirect URI: #{e.message}"
+    Rails.logger.warn "[SMART_PROXY_FETCHER] Invalid URI: #{e.message}"
     nil
   end
 
   def http_get(uri)
     use_ssl   = uri.is_a?(URI::HTTPS)
-    port      = uri.port || (use_ssl ? 443 : 80)
     remaining = MAX_RESPONSE_BYTES
 
-    Net::HTTP.start(uri.host, port,
+    Net::HTTP.start(uri.host, uri.port,
       use_ssl:      use_ssl,
       open_timeout: CONNECT_TIMEOUT,
       read_timeout: READ_TIMEOUT,
       verify_mode:  OpenSSL::SSL::VERIFY_PEER
     ) do |http|
       req = Net::HTTP::Get.new(uri.request_uri)
-      req["User-Agent"]      = "Ubyca-SmartProxy/1.0"
-      req["Accept"]          = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-      req["Accept-Language"] = "es,en;q=0.5"
+      req["User-Agent"]      = "Mozilla/5.0 (compatible; Ubyca-SmartProxy/1.0)"
+      req["Accept"]          = "*/*"
+      req["Accept-Language"] = "es,en;q=0.9"
+      # Explicitly disable compression so we get raw bytes.
+      # Some servers ignore this and send gzip anyway — decompress() handles it.
+      req["Accept-Encoding"] = "identity"
 
-      # Stream response to enforce size limit without loading everything into memory.
-      body = String.new("", encoding: "BINARY")
+      body = String.new("", encoding: Encoding::BINARY)
       http.request(req) do |resp|
         resp.read_body do |chunk|
           remaining -= chunk.bytesize
           if remaining < 0
-            Rails.logger.warn "[SMART_PROXY_FETCHER] Response too large, truncating"
+            Rails.logger.warn "[SMART_PROXY_FETCHER] Response body too large, truncating"
             body << chunk[0, chunk.bytesize + remaining]
             break
           end
           body << chunk
         end
-        # Attach body to response object so caller can read it normally.
         resp.instance_variable_set(:@body, body)
         resp.instance_variable_set(:@read, true)
         return resp
       end
     end
   rescue Net::OpenTimeout, Net::ReadTimeout => e
-    Rails.logger.warn "[SMART_PROXY_FETCHER] Timeout fetching #{uri}: #{e.message}"
+    Rails.logger.warn "[SMART_PROXY_FETCHER] Timeout: #{e.message}"
     nil
   rescue OpenSSL::SSL::SSLError => e
-    Rails.logger.warn "[SMART_PROXY_FETCHER] SSL error fetching #{uri}: #{e.message}"
+    Rails.logger.warn "[SMART_PROXY_FETCHER] SSL error: #{e.message}"
     nil
   rescue => e
-    Rails.logger.error "[SMART_PROXY_FETCHER] HTTP error fetching #{uri}: #{e.class}: #{e.message}"
+    Rails.logger.error "[SMART_PROXY_FETCHER] HTTP error: #{e.class}: #{e.message}"
     nil
-  end
-
-  # ── HTML rewriting ─────────────────────────────────────────────────────────
-
-  def rewrite_html(html, source_url)
-    source_uri  = URI.parse(source_url)
-    base_origin = "#{source_uri.scheme}://#{source_uri.host}"
-    base_origin += ":#{source_uri.port}" unless default_port?(source_uri)
-
-    # Remove any <base> tag — it would confuse the browser's relative URL resolution.
-    html = html.gsub(/<base\b[^>]*>/i, "")
-
-    # Rewrite href, src, action attributes (handles single + double quotes).
-    html = html.gsub(/(\s(?:href|src|action)\s*=\s*)(["'])(.*?)\2/im) do
-      attr_eq = $1
-      quote   = $2
-      url     = $3
-      new_url = rewrite_url(url, base_origin, source_uri)
-      "#{attr_eq}#{quote}#{new_url}#{quote}"
-    end
-
-    # Rewrite srcset (comma-separated "url [descriptor]" pairs).
-    html.gsub(/(\ssrcset\s*=\s*)(["'])(.*?)\2/im) do
-      attr_eq = $1
-      quote   = $2
-      srcset  = $3
-      new_srcset = rewrite_srcset(srcset, base_origin, source_uri)
-      "#{attr_eq}#{quote}#{new_srcset}#{quote}"
-    end
-  end
-
-  def rewrite_url(url, base_origin, source_uri)
-    url = url.to_s.strip
-    return url if url.empty?
-    return url if url.start_with?("data:", "mailto:", "tel:", "javascript:", "#")
-
-    if url.start_with?("//")
-      # Protocol-relative → treat as HTTPS and check domain.
-      full_url = "https:#{url}"
-      begin
-        u = URI.parse(full_url)
-        same_origin = same_origin?(u, base_origin)
-        same_origin ? "#{@proxy_prefix}#{u.path}#{query_string(u)}" : url
-      rescue URI::InvalidURIError
-        url
-      end
-
-    elsif url.start_with?("https://", "http://")
-      begin
-        u = URI.parse(url)
-        same_origin?(u, base_origin) ? "#{@proxy_prefix}#{u.path}#{query_string(u)}" : url
-      rescue URI::InvalidURIError
-        url
-      end
-
-    elsif url.start_with?("/")
-      # Root-relative → prefix with proxy path.
-      "#{@proxy_prefix}#{url}"
-
-    else
-      # Relative URL — the browser resolves it relative to the current proxy URL,
-      # which already has the proxy prefix, so no rewriting needed.
-      url
-    end
-  end
-
-  def rewrite_srcset(srcset, base_origin, source_uri)
-    srcset.split(",").map do |entry|
-      parts    = entry.strip.split(/\s+/, 2)
-      new_url  = rewrite_url(parts[0], base_origin, source_uri)
-      parts[0] = new_url
-      parts.join(" ")
-    end.join(", ")
-  end
-
-  def same_origin?(uri, base_origin)
-    candidate = "#{uri.scheme}://#{uri.host}"
-    candidate += ":#{uri.port}" unless default_port?(uri)
-    candidate == base_origin
-  end
-
-  def default_port?(uri)
-    (uri.scheme == "https" && uri.port == 443) ||
-      (uri.scheme == "http" && uri.port == 80)
-  end
-
-  def query_string(uri)
-    uri.query ? "?#{uri.query}" : ""
   end
 
   # ── Script injection ───────────────────────────────────────────────────────
 
   def inject_script(html)
     script = build_script
-    # Prefer injecting before </body>; fall back to before </head> or appending.
-    if html.include?("</body>")
-      html.sub("</body>", "#{script}\n</body>")
-    elsif html.include?("</head>")
-      html.sub("</head>", "#{script}\n</head>")
-    else
-      html + "\n" + script
+    if    html.include?("</body>") then html.sub("</body>", "#{script}\n</body>")
+    elsif html.include?("</head>") then html.sub("</head>", "#{script}\n</head>")
+    else  html + "\n" + script
     end
   end
 
@@ -262,9 +402,6 @@ class SmartProxyFetcher
     slug     = @smart_proxy.slug
     api_base = @api_base
 
-    # HEARTBEAT_INTERVAL must be shorter than SmartProxyLiveVisit::ACTIVE_WINDOW (45 s)
-    # so every live-visit record stays within the active window between beats.
-    # 30 s matches the same cadence used by Experiences for GeoPointLiveVisit.
     <<~HTML
       <script>
       (function(){
@@ -292,11 +429,10 @@ class SmartProxyFetcher
           proxySlug: #{slug.to_json},
           host:      window.location.hostname,
           apiBase:   #{api_base.to_json},
-          lastPos:   null,   // updated by watchPosition on every fix
+          lastPos:   null,
           watchId:   null
         };
 
-        // ── Analytics event sender ────────────────────────────────────────────
         function track(evt, data) {
           var payload = Object.assign({
             event_type:     evt,
@@ -314,15 +450,10 @@ class SmartProxyFetcher
           }).catch(function(){});
         }
 
-        // ── GPS — continuous watchPosition (same strategy as Experiences) ─────
-        // watchPosition keeps _u.lastPos current so every heartbeat carries
-        // fresh coordinates.  This feeds SmartProxyLiveVisit (live visits),
-        // analytics_events.latitude/longitude (hotspots), and GPS intensity.
         track('smart_proxy_location_requested');
 
         if (navigator.geolocation) {
           var _firstFix = true;
-
           _u.watchId = navigator.geolocation.watchPosition(
             function(pos) {
               _u.lastPos = {
@@ -330,17 +461,13 @@ class SmartProxyFetcher
                 longitude: pos.coords.longitude,
                 accuracy:  pos.coords.accuracy
               };
-              // Report granted only once (first fix).
               if (_firstFix) {
                 _firstFix = false;
                 track('smart_proxy_location_granted', _u.lastPos);
               }
             },
             function() {
-              if (_firstFix) {
-                _firstFix = false;
-                track('smart_proxy_location_denied');
-              }
+              if (_firstFix) { _firstFix = false; track('smart_proxy_location_denied'); }
             },
             { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
           );
@@ -348,13 +475,8 @@ class SmartProxyFetcher
           track('smart_proxy_location_denied');
         }
 
-        // ── Page opened ───────────────────────────────────────────────────────
         track('smart_proxy_opened');
 
-        // ── Heartbeat every 30 s ──────────────────────────────────────────────
-        // Includes latest GPS fix so the server can upsert SmartProxyLiveVisit
-        // with last_seen_at refreshed — identical to the live-visit heartbeat
-        // used by Experiences (POST /api/public/geo_points/:id/live_visit).
         var _startMs = Date.now();
         var _hbInterval = setInterval(function() {
           var gps = _u.lastPos ? {
@@ -365,12 +487,10 @@ class SmartProxyFetcher
           track('smart_proxy_heartbeat', gps);
         }, 30000);
 
-        // ── Visibility ────────────────────────────────────────────────────────
         document.addEventListener('visibilitychange', function() {
           track(document.hidden ? 'smart_proxy_page_hidden' : 'smart_proxy_page_visible');
         });
 
-        // ── Click tracking ────────────────────────────────────────────────────
         document.addEventListener('click', function(e) {
           var t = e.target || {};
           track('smart_proxy_click', {
@@ -380,7 +500,6 @@ class SmartProxyFetcher
           });
         });
 
-        // ── Cleanup and dwell on unload ───────────────────────────────────────
         window.addEventListener('pagehide', function() {
           clearInterval(_hbInterval);
           if (_u.watchId !== null) navigator.geolocation.clearWatch(_u.watchId);
@@ -391,19 +510,5 @@ class SmartProxyFetcher
       })();
       </script>
     HTML
-  end
-
-  # ── Encoding helpers ───────────────────────────────────────────────────────
-
-  def extract_charset(response)
-    ct = response["content-type"].to_s
-    ct[/charset\s*=\s*([^\s;]+)/i, 1]&.strip&.upcase
-  end
-
-  def force_utf8(body, charset)
-    return body.encode("UTF-8", invalid: :replace, undef: :replace) if charset.nil? || charset == "UTF-8"
-    body.encode("UTF-8", charset, invalid: :replace, undef: :replace)
-  rescue Encoding::ConverterNotFoundError
-    body.encode("UTF-8", invalid: :replace, undef: :replace)
   end
 end
