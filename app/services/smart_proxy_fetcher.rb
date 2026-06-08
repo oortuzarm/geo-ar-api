@@ -29,7 +29,39 @@ class SmartProxyFetcher
   MAX_REDIRECTS      = 5
 
   HTML_TYPES = %w[text/html application/xhtml+xml].freeze
-  CSS_TYPES  = %w[text/css].freeze
+
+  # URL extensions that must never be processed as HTML.
+  # Keyed by extension (lowercase, with dot), value is the fallback MIME type used
+  # when the origin returns text/html instead of the correct asset type.
+  ASSET_EXTENSIONS = {
+    ".css"   => "text/css",
+    ".js"    => "application/javascript",
+    ".mjs"   => "application/javascript",
+    ".cjs"   => "application/javascript",
+    ".ts"    => "application/typescript",
+    ".map"   => "application/json",
+    ".json"  => "application/json",
+    ".xml"   => "application/xml",
+    ".txt"   => "text/plain",
+    ".png"   => "image/png",
+    ".jpg"   => "image/jpeg",
+    ".jpeg"  => "image/jpeg",
+    ".gif"   => "image/gif",
+    ".svg"   => "image/svg+xml",
+    ".webp"  => "image/webp",
+    ".avif"  => "image/avif",
+    ".ico"   => "image/x-icon",
+    ".woff"  => "font/woff",
+    ".woff2" => "font/woff2",
+    ".ttf"   => "font/ttf",
+    ".otf"   => "font/otf",
+    ".eot"   => "application/vnd.ms-fontobject",
+    ".pdf"   => "application/pdf",
+    ".mp4"   => "video/mp4",
+    ".webm"  => "video/webm",
+    ".mp3"   => "audio/mpeg",
+    ".ogg"   => "audio/ogg",
+  }.freeze
 
   Result = Struct.new(:success, :body, :content_type, :error, keyword_init: true)
 
@@ -47,18 +79,32 @@ class SmartProxyFetcher
     target_url = build_target_url
     return Result.new(success: false, error: "invalid_destination_url") unless target_url
 
+    # Resolve expected MIME from URL extension BEFORE fetching.
+    # This short-circuits HTML processing for .css/.js/image/font requests
+    # regardless of what content-type the origin returns (some servers send
+    # text/html for 404 pages or SPA fallbacks on asset paths).
+    ext_mime = asset_mime_for_url(target_url)
+
     response = fetch_with_redirects(target_url)
     return Result.new(success: false, error: "fetch_failed") unless response
 
     raw_ct  = response["content-type"].to_s
     ct_base = raw_ct.split(";").first.to_s.strip.downcase
 
-    if HTML_TYPES.include?(ct_base)
+    if ext_mime
+      # Known asset extension — never run HTML pipeline.
+      # If origin returned text/html (error/redirect page), return an empty body
+      # with the correct asset MIME so the browser doesn't get a MIME-type error.
+      if ct_base == "text/html"
+        Rails.logger.warn "[SMART_PROXY_FETCHER] Origin returned text/html for asset #{target_url}"
+        Result.new(success: true, body: "", content_type: ext_mime)
+      else
+        serve_binary(response, raw_ct.presence || ext_mime)
+      end
+    elsif HTML_TYPES.include?(ct_base)
       serve_html(response, target_url)
-    elsif CSS_TYPES.include?(ct_base)
-      serve_css(response, target_url)
     else
-      serve_binary(response, raw_ct)
+      serve_binary(response, raw_ct.presence || "application/octet-stream")
     end
   rescue => e
     Rails.logger.error "[SMART_PROXY_FETCHER] #{e.class}: #{e.message}"
@@ -79,16 +125,6 @@ class SmartProxyFetcher
     html  = normalize_meta_charset(html)
     html  = inject_script(html)
     Result.new(success: true, body: html, content_type: "text/html; charset=utf-8")
-  end
-
-  def serve_css(response, target_url)
-    source_uri  = URI.parse(target_url)
-    base_origin = build_origin(source_uri)
-    raw         = decompress(response)
-    cs          = extract_charset_from_header(response)
-    css         = decode_to_utf8(raw, cs)
-    css         = rewrite_css(css, base_origin, source_uri)
-    Result.new(success: true, body: css, content_type: "text/css; charset=utf-8")
   end
 
   def serve_binary(response, raw_ct)
@@ -232,19 +268,9 @@ class SmartProxyFetcher
     end.join(", ")
   end
 
-  # ── CSS rewriting ──────────────────────────────────────────────────────────
+  # ── CSS url() rewriting (used only inside HTML: <style> blocks and style= attrs) ──
 
-  # Rewrite a complete CSS file: url() references and @import directives.
-  def rewrite_css(css, base_origin, source_uri)
-    css = rewrite_css_urls(css, base_origin, source_uri)
-
-    # @import "url"  or  @import 'url'  (without url() wrapper)
-    css.gsub(/@import\s+(["'])(.*?)\1/m) do
-      "@import #{$1}#{rewrite_url($2, base_origin, source_uri)}#{$1}"
-    end
-  end
-
-  # Rewrite url(...) occurrences in any CSS string (files, <style> blocks, inline styles).
+  # Rewrite url(...) occurrences in any CSS string.
   # Handles quoted (single/double) and unquoted values.
   def rewrite_css_urls(css, base_origin, source_uri)
     css.gsub(/url\(\s*(["']?)(.*?)\1\s*\)/m) do
@@ -277,6 +303,16 @@ class SmartProxyFetcher
   end
 
   # ── URL helpers ────────────────────────────────────────────────────────────
+
+  # Returns the fallback MIME type for a URL whose path has a known asset extension,
+  # or nil if the URL is not a recognized asset (e.g. an HTML page path).
+  def asset_mime_for_url(url)
+    path = URI.parse(url).path rescue url
+    ext  = File.extname(path.split("?").first).downcase
+    ASSET_EXTENSIONS[ext]
+  rescue
+    nil
+  end
 
   def build_origin(uri)
     o = "#{uri.scheme}://#{uri.host}"
