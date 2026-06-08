@@ -355,12 +355,21 @@ class SmartProxyFetcher
     html = html.gsub(/(<script\b[^>]*\bid\s*=\s*["']__NEXT_DATA__["'][^>]*>)(.*?)(<\/script>)/im) do
       tag_open, json_str, tag_close = $1, $2, $3
       begin
-        data           = JSON.parse(json_str)
-        old_prefix     = data["assetPrefix"].to_s
-        data["assetPrefix"] = @proxy_prefix
-        Rails.logger.info "[SP_FETCHER] NEXT_DATA_REWRITE " \
-                          "old_assetPrefix=#{old_prefix.inspect} " \
-                          "new=#{@proxy_prefix.inspect}"
+        data       = JSON.parse(json_str)
+        old_prefix = data["assetPrefix"].to_s
+        if old_prefix.start_with?("http://", "https://", "//")
+          # Absolute CDN prefix — chunks live on the CDN, not on origin.
+          # Overwriting would redirect dynamic chunk requests to origin/_next/... → 404.
+          Rails.logger.info "[SP_FETCHER] NEXT_DATA_PRESERVE " \
+                            "assetPrefix=#{old_prefix.inspect} (CDN, not rewritten)"
+        else
+          # Empty, nil, or relative prefix — chunks resolve against current domain.
+          # Rewrite so dynamic loading goes through the proxy instead of go.ubyca.com.
+          data["assetPrefix"] = @proxy_prefix
+          Rails.logger.info "[SP_FETCHER] NEXT_DATA_REWRITE " \
+                            "old=#{old_prefix.inspect} " \
+                            "new=#{@proxy_prefix.inspect}"
+        end
         "#{tag_open}#{data.to_json}#{tag_close}"
       rescue JSON::ParseError => e
         Rails.logger.warn "[SP_FETCHER] NEXT_DATA_PARSE_FAIL #{e.message}"
@@ -459,23 +468,12 @@ class SmartProxyFetcher
     end
   end
 
-  # Rewrite URLs embedded in inline script blocks (plain text, not attributes).
-  # Two passes:
-  #   1. Absolute same-origin URLs: https://origin.com/path → /proxy/prefix/path
-  #   2. Root-relative Next.js paths in string literals: "/_next/..." → "/proxy/prefix/_next/..."
-  #      The webpack runtime stores CSS/JS chunk paths as string literals like
-  #      "/_next/static/css/hash.css". Without rewriting these, the browser resolves
-  #      them against the proxy domain and bypasses the proxy entirely.
+  # Rewrite absolute same-origin URLs embedded in inline script blocks.
+  # Does NOT rewrite root-relative paths: those are handled either via __NEXT_DATA__
+  # assetPrefix (for Next.js) or via attribute-level rewriting (href=/src=).
   def rewrite_inline_urls(text, base_origin)
-    # Pass 1: absolute same-origin URLs.
     pattern = /#{Regexp.escape(base_origin)}(\/[^\s"'`<>\\),;]*)/i
-    text = text.gsub(pattern) { "#{@proxy_prefix}#{$1}" }
-
-    # Pass 2: root-relative /_next/ paths inside JS string/template literals.
-    # Matches the opening quote + path; the closing quote is left in-place by design.
-    text.gsub(/(["'`])(\/(?:_next)\/[^\s"'`\\]*)/) do
-      "#{$1}#{@proxy_prefix}#{$2}"
-    end
+    text.gsub(pattern) { "#{@proxy_prefix}#{$1}" }
   end
 
   # ── HTML cleanup ───────────────────────────────────────────────────────────
