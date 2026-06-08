@@ -53,9 +53,11 @@ module Api
       end
     end
 
-    # DELETE /api/smart_proxies/:id  — soft delete
+    # DELETE /api/smart_proxies/:id
     def destroy
-      @smart_proxy.update!(active: false)
+      Rails.logger.info "[SmartProxy] smart_proxy_destroy_requested proxy_id=#{@smart_proxy.id} name=#{@smart_proxy.name.inspect} user_id=#{current_user.id}"
+      @smart_proxy.destroy!
+      Rails.logger.info "[SmartProxy] smart_proxy_destroyed proxy_id=#{@smart_proxy.id}"
       head :no_content
     end
 
