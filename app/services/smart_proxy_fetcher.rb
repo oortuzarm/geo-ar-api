@@ -31,6 +31,9 @@ class SmartProxyFetcher
   CACHE_TTL          = 1.hour
 
   HTML_TYPES = %w[text/html application/xhtml+xml].freeze
+  FONT_MIMES = %w[font/woff font/woff2 font/ttf font/otf
+                  application/vnd.ms-fontobject application/x-font-woff
+                  application/x-font-ttf application/font-woff application/font-woff2].freeze
 
   # URL extensions that must never be processed as HTML.
   # Keyed by extension (lowercase, with dot), value is the fallback MIME type used
@@ -91,9 +94,11 @@ class SmartProxyFetcher
     # For static assets, check the server-side cache before hitting origin.
     if ext_mime
       Rails.logger.info "[SP_FETCHER] CACHE_STORE_CLASS #{Rails.cache.class.name}"
+      Rails.logger.info "[SP_FETCHER] FONT_REQUEST target=#{target_url.inspect}" if FONT_MIMES.include?(ext_mime)
       cached = load_from_cache(target_url)
       if cached
         Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_HIT target=#{target_url.inspect}"
+        Rails.logger.info "[SP_FETCHER] FONT_CACHE_HIT target=#{target_url.inspect}" if FONT_MIMES.include?(ext_mime)
         return cached
       end
       Rails.logger.info "[SP_FETCHER] SMART_PROXY_CACHE_MISS target=#{target_url.inspect}"
@@ -122,6 +127,12 @@ class SmartProxyFetcher
         Rails.logger.warn "[SP_FETCHER] ASSET_HTML_MISMATCH target=#{target_url.inspect} " \
                           "origin_ct=#{raw_ct.inspect} returning empty body with ext_mime=#{ext_mime.inspect}"
         Result.new(success: true, body: "", content_type: ext_mime)
+      elsif ext_mime == "text/css" && ct_base == "text/css"
+        # CSS files need URL rewriting so that font references (url() in @font-face,
+        # @import, etc.) point through the proxy instead of the bare origin.
+        # Direct requests from the browser to the origin for fonts trigger CORS errors.
+        Rails.logger.info "[SP_FETCHER] CSS_REWRITE target=#{target_url.inspect}"
+        serve_css(response, target_url)
       else
         Rails.logger.info "[SP_FETCHER] BINARY_ASSET target=#{target_url.inspect} ct=#{raw_ct.inspect}"
         serve_binary(response, raw_ct.presence || ext_mime)
@@ -132,6 +143,12 @@ class SmartProxyFetcher
     else
       Rails.logger.info "[SP_FETCHER] BINARY_OTHER target=#{target_url.inspect} ct=#{raw_ct.inspect}"
       serve_binary(response, raw_ct.presence || "application/octet-stream")
+    end
+
+    if FONT_MIMES.include?(ext_mime.to_s)
+      Rails.logger.info "[SP_FETCHER] FONT_RESPONSE content_type=#{result.content_type.inspect} " \
+                        "body_bytes=#{result.body.to_s.bytesize} " \
+                        "target=#{target_url.inspect}"
     end
 
     # Persist successful asset responses. Skip when origin returned an HTML error page
@@ -155,6 +172,19 @@ class SmartProxyFetcher
   private
 
   # ── Content-type dispatch ──────────────────────────────────────────────────
+
+  # Rewrite CSS url() and @import so that font and image references inside
+  # .css files point through the proxy instead of the bare origin.
+  # Without this, @font-face src URLs hit the origin directly → CORS error.
+  def serve_css(response, target_url)
+    source_uri  = URI.parse(target_url)
+    base_origin = build_origin(source_uri)
+    raw         = decompress(response)
+    cs          = extract_charset_from_header(response)
+    css         = decode_to_utf8(raw, cs)
+    css         = rewrite_css(css, base_origin, source_uri)
+    Result.new(success: true, body: css, content_type: "text/css; charset=utf-8")
+  end
 
   def serve_html(response, target_url)
     raw   = decompress(response)
@@ -315,10 +345,21 @@ class SmartProxyFetcher
     end.join(", ")
   end
 
-  # ── CSS url() rewriting (used only inside HTML: <style> blocks and style= attrs) ──
+  # ── CSS rewriting ─────────────────────────────────────────────────────────
 
-  # Rewrite url(...) occurrences in any CSS string.
-  # Handles quoted (single/double) and unquoted values.
+  # Full CSS rewrite: url() references + @import directives.
+  # Called for .css files served through the proxy (serve_css).
+  # Also called for inline <style> blocks via rewrite_html.
+  def rewrite_css(css, base_origin, source_uri)
+    css = rewrite_css_urls(css, base_origin, source_uri)
+    # @import "url"  or  @import 'url'  (without url() wrapper)
+    css.gsub(/@import\s+(["'])(.*?)\1/m) do
+      "@import #{$1}#{rewrite_url($2, base_origin, source_uri)}#{$1}"
+    end
+  end
+
+  # Rewrite url(...) occurrences: quoted, single-quoted, or bare.
+  # Used by serve_css, and by rewrite_html for <style> blocks and style= attrs.
   def rewrite_css_urls(css, base_origin, source_uri)
     css.gsub(/url\(\s*(["']?)(.*?)\1\s*\)/m) do
       quote = $1
