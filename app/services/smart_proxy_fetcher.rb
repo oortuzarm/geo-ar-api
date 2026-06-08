@@ -91,6 +91,19 @@ class SmartProxyFetcher
     # HTML pages have no known extension, so ext_mime is nil for them.
     ext_mime = asset_mime_for_url(target_url)
 
+    # Classify Next.js static resource requests for diagnostics.
+    next_resource_type =
+      if    target_url.include?("/_next/static/css/")    then "NEXT_CSS"
+      elsif target_url.include?("/_next/static/chunks/") then "NEXT_CHUNK"
+      elsif target_url.include?("/_next/static/media/")  then "NEXT_MEDIA"
+      elsif target_url.include?("/_next/")               then "NEXT_OTHER"
+      end
+    if next_resource_type
+      Rails.logger.info "[SP_FETCHER] #{next_resource_type}_REQUEST " \
+                        "path=#{@path.inspect} " \
+                        "target=#{target_url.inspect}"
+    end
+
     # For static assets, check the server-side cache before hitting origin.
     if ext_mime
       Rails.logger.info "[SP_FETCHER] CACHE_STORE_CLASS #{Rails.cache.class.name}"
@@ -121,6 +134,15 @@ class SmartProxyFetcher
                       "content_type=#{raw_ct.inspect} " \
                       "ct_base=#{ct_base.inspect} " \
                       "target=#{target_url.inspect}"
+
+    if next_resource_type && !%w[200 206].include?(response.code)
+      Rails.logger.warn "[SP_FETCHER] NEXT_RESOURCE_MISSING " \
+                        "type=#{next_resource_type} " \
+                        "status=#{response.code} " \
+                        "target=#{target_url.inspect} " \
+                        "ct=#{raw_ct.inspect} " \
+                        "body_bytes=#{response.body.to_s.bytesize}"
+    end
 
     result = if ext_mime
       if ct_base == "text/html"
@@ -326,9 +348,31 @@ class SmartProxyFetcher
       "#{$1}#{rewrite_css_urls($2, base_origin, source_uri)}#{$3}"
     end
 
-    # <script>...</script> blocks — rewrite absolute same-origin URLs embedded in
-    # JS strings and JSON config (covers plugin initializers like Real3D Flipbook).
+    # <script id="__NEXT_DATA__"> — rewrite assetPrefix so the Next.js client
+    # router configures webpack's public path to load CSS/JS chunks through the proxy.
+    # This is the primary fix for dynamic lazy-loaded CSS modules (e.g. login forms,
+    # modals) that Next.js inserts as <link> tags at runtime using the public path.
+    html = html.gsub(/(<script\b[^>]*\bid\s*=\s*["']__NEXT_DATA__["'][^>]*>)(.*?)(<\/script>)/im) do
+      tag_open, json_str, tag_close = $1, $2, $3
+      begin
+        data           = JSON.parse(json_str)
+        old_prefix     = data["assetPrefix"].to_s
+        data["assetPrefix"] = @proxy_prefix
+        Rails.logger.info "[SP_FETCHER] NEXT_DATA_REWRITE " \
+                          "old_assetPrefix=#{old_prefix.inspect} " \
+                          "new=#{@proxy_prefix.inspect}"
+        "#{tag_open}#{data.to_json}#{tag_close}"
+      rescue JSON::ParseError => e
+        Rails.logger.warn "[SP_FETCHER] NEXT_DATA_PARSE_FAIL #{e.message}"
+        "#{tag_open}#{json_str}#{tag_close}"
+      end
+    end
+
+    # All other <script>...</script> blocks — rewrite embedded same-origin URLs
+    # and Next.js root-relative paths (webpack manifests, build manifests, configs).
     html = html.gsub(/(<script\b[^>]*>)(.*?)(<\/script>)/im) do
+      # Skip __NEXT_DATA__ — already handled with JSON-aware rewrite above.
+      next "#{$1}#{$2}#{$3}" if $1.match?(/\bid\s*=\s*["']__NEXT_DATA__["']/i)
       "#{$1}#{rewrite_inline_urls($2, base_origin)}#{$3}"
     end
 
@@ -415,16 +459,23 @@ class SmartProxyFetcher
     end
   end
 
-  # Rewrite absolute same-origin URLs embedded in plain text (JS strings, JSON config).
-  # Used for <script> blocks where plugin initializers (e.g. Real3D Flipbook) embed
-  # absolute asset URLs that must be proxied.
-  #
-  # Matches: https://www.tipytap.cl/some/path  (must start with / after origin)
-  # Stops at: quote  backtick  whitespace  <  >  \  )  ,  ;
-  # Does NOT rewrite cross-origin URLs.
+  # Rewrite URLs embedded in inline script blocks (plain text, not attributes).
+  # Two passes:
+  #   1. Absolute same-origin URLs: https://origin.com/path → /proxy/prefix/path
+  #   2. Root-relative Next.js paths in string literals: "/_next/..." → "/proxy/prefix/_next/..."
+  #      The webpack runtime stores CSS/JS chunk paths as string literals like
+  #      "/_next/static/css/hash.css". Without rewriting these, the browser resolves
+  #      them against the proxy domain and bypasses the proxy entirely.
   def rewrite_inline_urls(text, base_origin)
+    # Pass 1: absolute same-origin URLs.
     pattern = /#{Regexp.escape(base_origin)}(\/[^\s"'`<>\\),;]*)/i
-    text.gsub(pattern) { "#{@proxy_prefix}#{$1}" }
+    text = text.gsub(pattern) { "#{@proxy_prefix}#{$1}" }
+
+    # Pass 2: root-relative /_next/ paths inside JS string/template literals.
+    # Matches the opening quote + path; the closing quote is left in-place by design.
+    text.gsub(/(["'`])(\/(?:_next)\/[^\s"'`\\]*)/) do
+      "#{$1}#{@proxy_prefix}#{$2}"
+    end
   end
 
   # ── HTML cleanup ───────────────────────────────────────────────────────────
