@@ -126,6 +126,13 @@ class SmartProxyFetcher
       if ct_base == "text/html"
         Rails.logger.warn "[SP_FETCHER] ASSET_HTML_MISMATCH target=#{target_url.inspect} " \
                           "origin_ct=#{raw_ct.inspect} returning empty body with ext_mime=#{ext_mime.inspect}"
+        if ext_mime == "text/css"
+          Rails.logger.warn "[SP_FETCHER] CSS_RESPONSE " \
+                            "target=#{target_url.inspect} " \
+                            "origin_status=#{response.code} " \
+                            "origin_ct=#{raw_ct.inspect} " \
+                            "body_bytes=0 (HTML_MISMATCH — stylesheet returned error page)"
+        end
         Result.new(success: true, body: "", content_type: ext_mime)
       elsif ext_mime == "text/css" && ct_base == "text/css"
         # CSS files need URL rewriting so that font references (url() in @font-face,
@@ -183,6 +190,13 @@ class SmartProxyFetcher
     cs          = extract_charset_from_header(response)
     css         = decode_to_utf8(raw, cs)
     css         = rewrite_css(css, base_origin, source_uri)
+
+    Rails.logger.info "[SP_FETCHER] CSS_RESPONSE " \
+                      "target=#{target_url.inspect} " \
+                      "origin_status=#{response.code} " \
+                      "origin_ct=#{response["content-type"].inspect} " \
+                      "body_bytes=#{css.bytesize}"
+
     Result.new(success: true, body: css, content_type: "text/css; charset=utf-8")
   end
 
@@ -277,6 +291,14 @@ class SmartProxyFetcher
     source_uri  = URI.parse(source_url)
     base_origin = build_origin(source_uri)
 
+    # Log every <link rel="stylesheet"> BEFORE rewriting so we can compare with
+    # what the origin page sent vs what we serve to the browser.
+    html.scan(/<link\b[^>]*>/i) do |tag|
+      next unless tag.match?(/\brel\s*=\s*["']?stylesheet["']?/i)
+      href = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)&.then { _1[2] }
+      Rails.logger.info "[SP_FETCHER] STYLESHEET_LINK original=#{href.inspect} tag=#{tag.gsub(/\s+/, " ").strip.inspect}"
+    end
+
     # Remove <base> — the proxy URL must serve as the implicit base.
     html = html.gsub(/<base\b[^>]*>/i, "")
 
@@ -303,9 +325,18 @@ class SmartProxyFetcher
 
     # <script>...</script> blocks — rewrite absolute same-origin URLs embedded in
     # JS strings and JSON config (covers plugin initializers like Real3D Flipbook).
-    html.gsub(/(<script\b[^>]*>)(.*?)(<\/script>)/im) do
+    html = html.gsub(/(<script\b[^>]*>)(.*?)(<\/script>)/im) do
       "#{$1}#{rewrite_inline_urls($2, base_origin)}#{$3}"
     end
+
+    # Log every <link rel="stylesheet"> AFTER rewriting — compare with originals above.
+    html.scan(/<link\b[^>]*>/i) do |tag|
+      next unless tag.match?(/\brel\s*=\s*["']?stylesheet["']?/i)
+      href = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)&.then { _1[2] }
+      Rails.logger.info "[SP_FETCHER] STYLESHEET_REWRITTEN to=#{href.inspect}"
+    end
+
+    html
   end
 
   def rewrite_url(url, base_origin, source_uri)
