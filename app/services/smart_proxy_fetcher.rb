@@ -77,37 +77,50 @@ class SmartProxyFetcher
 
   def call
     target_url = build_target_url
-    return Result.new(success: false, error: "invalid_destination_url") unless target_url
+    unless target_url
+      Rails.logger.error "[SP_FETCHER] invalid_destination_url proxy_id=#{@smart_proxy.id} path=#{@path.inspect}"
+      return Result.new(success: false, error: "invalid_destination_url")
+    end
 
     # Resolve expected MIME from URL extension BEFORE fetching.
-    # This short-circuits HTML processing for .css/.js/image/font requests
-    # regardless of what content-type the origin returns (some servers send
-    # text/html for 404 pages or SPA fallbacks on asset paths).
     ext_mime = asset_mime_for_url(target_url)
 
+    Rails.logger.info "[SP_FETCHER] FETCH target=#{target_url.inspect} " \
+                      "ext_mime=#{ext_mime.inspect} " \
+                      "proxy_prefix=#{@proxy_prefix.inspect}"
+
     response = fetch_with_redirects(target_url)
-    return Result.new(success: false, error: "fetch_failed") unless response
+    unless response
+      Rails.logger.error "[SP_FETCHER] fetch_failed target=#{target_url.inspect}"
+      return Result.new(success: false, error: "fetch_failed")
+    end
 
     raw_ct  = response["content-type"].to_s
     ct_base = raw_ct.split(";").first.to_s.strip.downcase
 
+    Rails.logger.info "[SP_FETCHER] ORIGIN status=#{response.code} " \
+                      "content_type=#{raw_ct.inspect} " \
+                      "ct_base=#{ct_base.inspect} " \
+                      "target=#{target_url.inspect}"
+
     if ext_mime
-      # Known asset extension — never run HTML pipeline.
-      # If origin returned text/html (error/redirect page), return an empty body
-      # with the correct asset MIME so the browser doesn't get a MIME-type error.
       if ct_base == "text/html"
-        Rails.logger.warn "[SMART_PROXY_FETCHER] Origin returned text/html for asset #{target_url}"
+        Rails.logger.warn "[SP_FETCHER] ASSET_HTML_MISMATCH target=#{target_url.inspect} " \
+                          "origin_ct=#{raw_ct.inspect} returning empty body with ext_mime=#{ext_mime.inspect}"
         Result.new(success: true, body: "", content_type: ext_mime)
       else
+        Rails.logger.info "[SP_FETCHER] BINARY_ASSET target=#{target_url.inspect} ct=#{raw_ct.inspect}"
         serve_binary(response, raw_ct.presence || ext_mime)
       end
     elsif HTML_TYPES.include?(ct_base)
+      Rails.logger.info "[SP_FETCHER] HTML_PAGE target=#{target_url.inspect}"
       serve_html(response, target_url)
     else
+      Rails.logger.info "[SP_FETCHER] BINARY_OTHER target=#{target_url.inspect} ct=#{raw_ct.inspect}"
       serve_binary(response, raw_ct.presence || "application/octet-stream")
     end
   rescue => e
-    Rails.logger.error "[SMART_PROXY_FETCHER] #{e.class}: #{e.message}"
+    Rails.logger.error "[SP_FETCHER] EXCEPTION #{e.class}: #{e.message}\n#{e.backtrace.first(3).join("\n")}"
     Result.new(success: false, error: "internal_error")
   end
 
@@ -365,6 +378,7 @@ class SmartProxyFetcher
 
     if response.is_a?(Net::HTTPRedirection)
       location = response["location"].to_s.strip
+      Rails.logger.info "[SP_FETCHER] REDIRECT #{response.code} #{url.inspect} → #{location.inspect} (hop #{count + 1})"
       return nil if location.empty?
       next_url = location.start_with?("http") ? location : URI.join(url, location).to_s
       fetch_with_redirects(next_url, count + 1)
@@ -372,7 +386,7 @@ class SmartProxyFetcher
       response
     end
   rescue URI::InvalidURIError => e
-    Rails.logger.warn "[SMART_PROXY_FETCHER] Invalid URI: #{e.message}"
+    Rails.logger.warn "[SP_FETCHER] Invalid URI: #{e.message}"
     nil
   end
 

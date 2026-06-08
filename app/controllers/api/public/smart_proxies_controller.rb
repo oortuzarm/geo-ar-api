@@ -9,6 +9,14 @@ module Api
     class SmartProxiesController < ApplicationController
       # GET /proxy/:org_slug/:proxy_slug(/*path)
       def show
+        # DIAG: log every inbound request so we can confirm which assets reach Rails.
+        Rails.logger.info "[SP_CTRL] method=#{request.method} " \
+                          "request_path=#{request.path.inspect} " \
+                          "org=#{params[:org_slug].inspect} " \
+                          "proxy=#{params[:proxy_slug].inspect} " \
+                          "path_param=#{params[:path].inspect} " \
+                          "format=#{params[:format].inspect}"
+
         smart_proxy = SmartProxy.resolve(
           host:       request.host,
           org_slug:   params[:org_slug],
@@ -20,6 +28,12 @@ module Api
         path    = params[:path].to_s
         fetcher = SmartProxyFetcher.new(smart_proxy, path, request.base_url)
         result  = fetcher.call
+
+        # DIAG: log what we are sending back to the browser.
+        Rails.logger.info "[SP_CTRL] response content_type=#{result.content_type.inspect} " \
+                          "success=#{result.success} " \
+                          "body_bytes=#{result.body.to_s.bytesize} " \
+                          "error=#{result.error.inspect}"
 
         if result.success
           mark_supported(smart_proxy)
