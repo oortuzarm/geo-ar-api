@@ -223,8 +223,8 @@ class SmartProxyFetcher
     html = html.gsub(/<base\b[^>]*>/i, "")
 
     # Rewrite URL-bearing attributes.
-    # Covers standard attrs + common lazy-load patterns (data-src, data-bg, poster).
-    html = html.gsub(/(\s(?:href|src|action|data-src|data-bg|poster)\s*=\s*)(["'])(.*?)\2/im) do
+    # Covers standard attrs + lazy-load patterns + plugin data attributes (Real3D, etc.).
+    html = html.gsub(/(\s(?:href|src|action|data-src|data-bg|poster|data-pdf|data-file|data-url)\s*=\s*)(["'])(.*?)\2/im) do
       "#{$1}#{$2}#{rewrite_url($3, base_origin, source_uri)}#{$2}"
     end
 
@@ -239,8 +239,14 @@ class SmartProxyFetcher
     end
 
     # <style>...</style> blocks.
-    html.gsub(/(<style\b[^>]*>)(.*?)(<\/style>)/im) do
+    html = html.gsub(/(<style\b[^>]*>)(.*?)(<\/style>)/im) do
       "#{$1}#{rewrite_css_urls($2, base_origin, source_uri)}#{$3}"
+    end
+
+    # <script>...</script> blocks — rewrite absolute same-origin URLs embedded in
+    # JS strings and JSON config (covers plugin initializers like Real3D Flipbook).
+    html.gsub(/(<script\b[^>]*>)(.*?)(<\/script>)/im) do
+      "#{$1}#{rewrite_inline_urls($2, base_origin)}#{$3}"
     end
   end
 
@@ -291,6 +297,18 @@ class SmartProxyFetcher
       url   = $2.strip
       "url(#{quote}#{rewrite_url(url, base_origin, source_uri)}#{quote})"
     end
+  end
+
+  # Rewrite absolute same-origin URLs embedded in plain text (JS strings, JSON config).
+  # Used for <script> blocks where plugin initializers (e.g. Real3D Flipbook) embed
+  # absolute asset URLs that must be proxied.
+  #
+  # Matches: https://www.tipytap.cl/some/path  (must start with / after origin)
+  # Stops at: quote  backtick  whitespace  <  >  \  )  ,  ;
+  # Does NOT rewrite cross-origin URLs.
+  def rewrite_inline_urls(text, base_origin)
+    pattern = /#{Regexp.escape(base_origin)}(\/[^\s"'`<>\\),;]*)/i
+    text.gsub(pattern) { "#{@proxy_prefix}#{$1}" }
   end
 
   # ── HTML cleanup ───────────────────────────────────────────────────────────
