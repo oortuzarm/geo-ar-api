@@ -1,4 +1,15 @@
 Rails.application.routes.draw do
+  # ── Smart Proxy — root-level routes (NOT under /api/public/) ─────────────────
+  # URL pattern: https://go.ubyca.com/proxy/:org_slug/:proxy_slug[/*path]
+  # The controller lives in Api::Public but the path is intentionally at root
+  # so the public URL is clean and future custom-domain routing can intercept here.
+  get "proxy/:org_slug/:proxy_slug",        to: "api/public/smart_proxies#show",
+                                            defaults: { path: "" }
+  get "proxy/:org_slug/:proxy_slug/*path",  to: "api/public/smart_proxies#show"
+
+  # Preflight for the analytics events endpoint (called from custom domains).
+  match "api/public/smart_proxy_events", to: proc { [ 204, {}, [] ] }, via: :options
+
   # ── Ubyca API v1 ────────────────────────────────────────────────────────────
   namespace :api do
     namespace :v1 do
@@ -57,6 +68,9 @@ Rails.application.routes.draw do
       # Smart Links public endpoints — namespaced by organization slug
       get  "smart_links/:organization_slug/:slug",          to: "smart_links#show",     as: :smart_link
       post "smart_links/:organization_slug/:slug/validate", to: "smart_links#validate", as: :validate_smart_link
+
+      # Smart Proxy analytics events — emitted by the injected browser script
+      post "smart_proxy_events", to: "smart_proxy_events#create"
     end
 
     resources :geo_projects do
@@ -129,6 +143,22 @@ Rails.application.routes.draw do
 
     # Smart Links Studio CRUD
     resources :smart_links
+
+    # Smart Proxies — Studio CRUD + analytics endpoints
+    # Collection live_visits: org-level summary across all proxies.
+    # Member routes mirror the shape of geo_project analytics endpoints so the
+    # frontend can reuse the same components for both surfaces.
+    resources :smart_proxies do
+      collection do
+        get :live_visits                                              # org-level active sessions
+      end
+      member do
+        get "live_visits",         to: "smart_proxies#proxy_live_visits",   as: :proxy_live_visits
+        get "analytics",           to: "smart_proxies#analytics"
+        get "analytics/intensity", to: "smart_proxies#analytics_intensity", as: :analytics_intensity
+        get "hotspots",            to: "smart_proxies#proxy_hotspots",      as: :proxy_hotspots
+      end
+    end
 
     # Standalone update/delete for geo_points
     # (frontend calls PUT /api/geo_points/:id and DELETE /api/geo_points/:id)

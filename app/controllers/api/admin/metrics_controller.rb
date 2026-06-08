@@ -13,7 +13,10 @@ module Api
           totalPublishedProjects: GeoProject.where(status: "active").count,
           totalDraftProjects:     GeoProject.where(status: "draft").count,
           totalOrphanProjects:    GeoProject.where(user_id: nil).count,
-          totalPoints:            GeoPoint.count
+          totalPoints:            GeoPoint.count,
+          totalSmartProxies:      SmartProxy.count,
+          totalActiveSmartProxies: SmartProxy.where(active: true).count,
+          totalSmartProxyVisits:  SmartProxyLiveVisit.active_now.count
         }
       end
     end

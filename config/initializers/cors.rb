@@ -40,14 +40,26 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
              credentials: false
   end
 
-  # Smart Links redirect domain — public, credential-free.
+  # Smart Links / Smart Proxy redirect domain — public, credential-free.
   # Covers the entire /api/public/* namespace: Smart Link resolve + validate,
-  # geo_project show, geo_points index + access, and live_visit heartbeat.
+  # geo_project show, geo_points index + access, live_visit heartbeat, and
+  # Smart Proxy analytics events (smart_proxy_events).
   allow do
     origins(*GO_ORIGINS)
     resource "/api/public/*",
              headers:     :any,
              methods:     %i[get post options head],
+             credentials: false
+  end
+
+  # Smart Proxy analytics events — also reachable from any origin because the
+  # injected script runs inside proxied pages that may be on custom domains.
+  # This is the narrowest wildcard we can use while supporting custom domains.
+  allow do
+    origins "*"
+    resource "/api/public/smart_proxy_events",
+             headers:     :any,
+             methods:     %i[post options],
              credentials: false
   end
 end
