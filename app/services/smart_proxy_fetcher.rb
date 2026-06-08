@@ -329,7 +329,7 @@ class SmartProxyFetcher
 
     # Rewrite URL-bearing attributes.
     # Covers standard attrs + lazy-load patterns + plugin data attributes (Real3D, etc.).
-    html = html.gsub(/(\s(?:href|src|action|data-src|data-bg|poster|data-pdf|data-file|data-url)\s*=\s*)(["'])(.*?)\2/im) do
+    html = html.gsub(/(\s(?:href|src|action|data-src|data-bg|poster|data-pdf|data-file|data-url|data-href|data-link)\s*=\s*)(["'])(.*?)\2/im) do
       "#{$1}#{$2}#{rewrite_url($3, base_origin, source_uri)}#{$2}"
     end
 
@@ -453,7 +453,7 @@ class SmartProxyFetcher
   def rewrite_css(css, base_origin, source_uri)
     css = rewrite_css_urls(css, base_origin, source_uri)
     # @import "url"  or  @import 'url'  (without url() wrapper)
-    css.gsub(/@import\s+(["'])(.*?)\1/m) do
+    css.gsub(/@import\s*(["'])(.*?)\1/m) do
       "@import #{$1}#{rewrite_url($2, base_origin, source_uri)}#{$1}"
     end
   end
@@ -699,11 +699,13 @@ class SmartProxyFetcher
   end
 
   def build_script
-    org      = @smart_proxy.organization
-    proxy_id = @smart_proxy.id
-    org_slug = org.slug
-    slug     = @smart_proxy.slug
-    api_base = @api_base
+    org          = @smart_proxy.organization
+    proxy_id     = @smart_proxy.id
+    org_slug     = org.slug
+    slug         = @smart_proxy.slug
+    api_base     = @api_base
+    origin_host  = URI.parse(@smart_proxy.destination_url).host.to_s rescue ""
+    proxy_prefix = @proxy_prefix
 
     <<~HTML
       <script>
@@ -735,6 +737,17 @@ class SmartProxyFetcher
           lastPos:   null,
           watchId:   null
         };
+
+        var _OH = #{origin_host.to_json};
+        var _PP = #{proxy_prefix.to_json};
+        function proxify(href) {
+          if (!href) return null;
+          try {
+            var u = new URL(href, location.href);
+            if (u.hostname !== _OH) return null;
+            return _PP + u.pathname + u.search + u.hash;
+          } catch (_e) { return null; }
+        }
 
         function track(evt, data) {
           var payload = Object.assign({
@@ -801,7 +814,22 @@ class SmartProxyFetcher
             href: t.href  || null,
             text: (t.innerText || t.textContent || '').trim().slice(0, 100)
           });
-        });
+          var el = t.closest ? t.closest('a') : (function(){
+            var n = t; while (n && n.tagName !== 'A') n = n.parentElement; return n;
+          })();
+          if (!el) return;
+          var raw = el.href || '';
+          if (!raw || raw === '#' || /^(javascript|mailto|tel|blob):/.test(raw)) return;
+          var proxied = proxify(raw);
+          if (!proxied) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (el.getAttribute('target') === '_blank') {
+            window.open(proxied, '_blank', 'noopener,noreferrer');
+          } else {
+            location.href = proxied;
+          }
+        }, true);
 
         window.addEventListener('pagehide', function() {
           clearInterval(_hbInterval);
