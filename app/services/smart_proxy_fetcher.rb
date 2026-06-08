@@ -536,8 +536,30 @@ class SmartProxyFetcher
 
   def build_target_url
     base = @smart_proxy.destination_url.chomp("/")
-    @path.present? ? "#{base}/#{@path}" : base
-  rescue
+
+    if @path.blank?
+      # Root request — load the configured destination page exactly as stored.
+      Rails.logger.info "[SP_FETCHER] URL_RESOLVE input=(root) resolved=#{base.inspect}"
+      return base
+    end
+
+    # Sub-resource paths are ALWAYS resolved against the origin root (scheme://host),
+    # never against destination_url's full path. proxy_path() stores the absolute path
+    # component of the original URL (e.g. "/css/file.css" → "css/file.css" in @path),
+    # so prepending destination_url's own path would double-prefix it:
+    #   destination "https://example.com/subdir" + path "css/file.css"
+    #   → "https://example.com/subdir/css/file.css"  ← WRONG
+    #   origin_root "https://example.com" + path "css/file.css"
+    #   → "https://example.com/css/file.css"          ← CORRECT
+    origin_root = build_origin(URI.parse(base))
+    target      = "#{origin_root}/#{@path}"
+    Rails.logger.info "[SP_FETCHER] URL_RESOLVE input=#{@path.inspect} " \
+                      "destination=#{base.inspect} " \
+                      "origin=#{origin_root.inspect} " \
+                      "resolved=#{target.inspect}"
+    target
+  rescue => e
+    Rails.logger.error "[SP_FETCHER] URL_RESOLVE_ERROR path=#{@path.inspect} error=#{e.message}"
     nil
   end
 
