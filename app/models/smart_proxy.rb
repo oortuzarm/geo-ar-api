@@ -1,5 +1,6 @@
 class SmartProxy < ApplicationRecord
-  PROXY_STATUSES = %w[unknown supported partial failed].freeze
+  PROXY_STATUSES         = %w[unknown supported partial failed].freeze
+  COMPATIBILITY_STATUSES = %w[pending compatible partial incompatible].freeze
 
   GO_BASE_URL = "https://go.ubyca.com".freeze
 
@@ -34,20 +35,24 @@ class SmartProxy < ApplicationRecord
 
   def as_api_json
     {
-      id:             id,
-      name:           name,
-      slug:           slug,
-      organizationId: organization_id,
-      organizationSlug: organization.slug,
-      publicUrl:      public_url,
-      destinationUrl: destination_url,
-      proxyStatus:    proxy_status,
-      active:         active,
-      customDomain:   custom_domain,
-      domainStatus:   domain_status,
-      sslStatus:      ssl_status,
-      createdAt:      created_at.iso8601(3),
-      updatedAt:      updated_at.iso8601(3)
+      id:                     id,
+      name:                   name,
+      slug:                   slug,
+      organizationId:         organization_id,
+      organizationSlug:       organization.slug,
+      publicUrl:              public_url,
+      destinationUrl:         destination_url,
+      proxyStatus:            proxy_status,
+      active:                 active,
+      customDomain:           custom_domain,
+      domainStatus:           domain_status,
+      sslStatus:              ssl_status,
+      compatibilityStatus:    compatibility_status,
+      compatibilityScore:     compatibility_score,
+      compatibilityReport:    compatibility_report,
+      compatibilityCheckedAt: compatibility_checked_at&.iso8601(3),
+      createdAt:              created_at.iso8601(3),
+      updatedAt:              updated_at.iso8601(3)
     }
   end
 

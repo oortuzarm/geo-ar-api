@@ -36,6 +36,7 @@ module Api
       )
 
       if @smart_proxy.save
+        SmartProxies::CompatibilityScanJob.perform_later(@smart_proxy.id)
         render json: @smart_proxy.reload.as_api_json, status: :created
       else
         render json: { error: @smart_proxy.errors.full_messages.first }, status: :unprocessable_entity
@@ -45,6 +46,7 @@ module Api
     # PATCH /api/smart_proxies/:id
     def update
       if @smart_proxy.update(smart_proxy_params)
+        SmartProxies::CompatibilityScanJob.perform_later(@smart_proxy.id) if @smart_proxy.saved_change_to_destination_url?
         render json: @smart_proxy.as_api_json
       else
         render json: { error: @smart_proxy.errors.full_messages.first }, status: :unprocessable_entity
