@@ -149,6 +149,12 @@ class SmartProxyFetcher
         Rails.logger.warn "[SP_FETCHER] ASSET_HTML_MISMATCH target=#{target_url.inspect} " \
                           "origin_ct=#{raw_ct.inspect} returning empty body with ext_mime=#{ext_mime.inspect}"
         if ext_mime == "text/css"
+          proxied_url = "#{@proxy_prefix}/#{@path}"
+          Rails.logger.warn "[SP_FETCHER] smart_proxy_css_mime_mismatch " \
+                            "original_url=#{target_url.inspect} " \
+                            "proxied_url=#{proxied_url.inspect} " \
+                            "content_type=#{raw_ct.inspect} " \
+                            "status=#{response.code}"
           Rails.logger.warn "[SP_FETCHER] CSS_RESPONSE " \
                             "target=#{target_url.inspect} " \
                             "origin_status=#{response.code} " \
@@ -324,6 +330,18 @@ class SmartProxyFetcher
     end
     Rails.logger.info "[SP_FETCHER] STYLESHEET_COUNT_BEFORE count=#{before_stylesheets.size}"
 
+    # Log CSS preload/prefetch hints before rewriting so we can trace their original URLs.
+    # These affect font loading timing and are a common source of post-hydration breakage.
+    html.scan(/<link\b[^>]*>/i) do |tag|
+      next unless tag.match?(/\brel\s*=\s*["']?(?:preload|prefetch)["']?/i)
+      next unless tag.match?(/\bas\s*=\s*["']?style["']?/i)
+      href_m = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)
+      rel_m  = tag.match(/\brel\s*=\s*["']?(\w+)["']?/i)
+      Rails.logger.info "[SP_FETCHER] CSS_PRELOAD_LINK " \
+                        "rel=#{rel_m&.dig(1).inspect} " \
+                        "href=#{href_m&.dig(2).inspect}"
+    end
+
     # Remove <base> — the proxy URL must serve as the implicit base.
     html = html.gsub(/<base\b[^>]*>/i, "")
 
@@ -358,10 +376,20 @@ class SmartProxyFetcher
         data       = JSON.parse(json_str)
         old_prefix = data["assetPrefix"].to_s
         if old_prefix.start_with?("http://", "https://", "//")
-          # Absolute CDN prefix — chunks live on the CDN, not on origin.
-          # Overwriting would redirect dynamic chunk requests to origin/_next/... → 404.
-          Rails.logger.info "[SP_FETCHER] NEXT_DATA_PRESERVE " \
-                            "assetPrefix=#{old_prefix.inspect} (CDN, not rewritten)"
+          # Absolute CDN prefix — store the CDN base URL in cache so that sub-requests
+          # for _next/static/* fetch from the CDN instead of the origin host.
+          # Rewrite assetPrefix to the proxy prefix so Next.js routes dynamic CSS/JS
+          # chunk requests through the proxy, enabling font URL rewriting inside those
+          # chunks.  Without this, post-hydration CSS loads from the CDN without URL
+          # rewriting, and @font-face src URLs are resolved against the CDN domain —
+          # any CORS restriction on the CDN causes fonts to fall back to Times New Roman.
+          cdn_base = old_prefix.start_with?("//") ? "https:#{old_prefix}" : old_prefix
+          store_cdn_prefix(cdn_base.chomp("/"))
+          data["assetPrefix"] = @proxy_prefix
+          Rails.logger.info "[SP_FETCHER] NEXT_DATA_REWRITE_CDN " \
+                            "old_cdn=#{cdn_base.inspect} " \
+                            "new=#{@proxy_prefix.inspect} " \
+                            "(CDN cached — _next/static chunks will route through proxy)"
         else
           # Empty, nil, or relative prefix — chunks resolve against current domain.
           # Rewrite so dynamic loading goes through the proxy instead of go.ubyca.com.
@@ -592,6 +620,21 @@ class SmartProxyFetcher
       return base
     end
 
+    # For Next.js static/data assets, use the cached CDN base URL if available.
+    # Sites with an absolute CDN assetPrefix (e.g. static.falabella.io) store their
+    # _next/static/* and _next/data/* files on the CDN, not on the origin host.
+    # We rewrite assetPrefix to the proxy prefix so dynamic chunks go through the
+    # proxy (enabling font URL rewriting), but the actual files must be fetched from
+    # the CDN.  Without this, origin returns 404/HTML → empty CSS → font fallback.
+    if (@path.start_with?("_next/static/") || @path.start_with?("_next/data/")) &&
+       (cdn = load_cdn_prefix)
+      target = "#{cdn}/#{@path}"
+      Rails.logger.info "[SP_FETCHER] URL_RESOLVE_CDN input=#{@path.inspect} " \
+                        "cdn=#{cdn.inspect} " \
+                        "resolved=#{target.inspect}"
+      return target
+    end
+
     # Sub-resource paths are ALWAYS resolved against the origin root (scheme://host),
     # never against destination_url's full path. proxy_path() stores the absolute path
     # component of the original URL (e.g. "/css/file.css" → "css/file.css" in @path),
@@ -609,6 +652,29 @@ class SmartProxyFetcher
     target
   rescue => e
     Rails.logger.error "[SP_FETCHER] URL_RESOLVE_ERROR path=#{@path.inspect} error=#{e.message}"
+    nil
+  end
+
+  # ── CDN prefix cache ──────────────────────────────────────────────────────
+
+  # Per-proxy cache key for the CDN base URL discovered from __NEXT_DATA__.assetPrefix.
+  def cdn_prefix_cache_key
+    "smart_proxy/cdn_prefix/#{@smart_proxy.id}"
+  end
+
+  # Persist the CDN base URL so subsequent asset sub-requests can use it.
+  def store_cdn_prefix(cdn_base)
+    Rails.cache.write(cdn_prefix_cache_key, cdn_base, expires_in: 2.hours)
+    Rails.logger.info "[SP_FETCHER] CDN_PREFIX_STORED cdn=#{cdn_base.inspect}"
+  rescue => e
+    Rails.logger.warn "[SP_FETCHER] CDN_PREFIX_STORE_FAILED #{e.message}"
+  end
+
+  # Read the CDN base URL from cache. Returns nil on miss or error.
+  def load_cdn_prefix
+    Rails.cache.read(cdn_prefix_cache_key)
+  rescue => e
+    Rails.logger.warn "[SP_FETCHER] CDN_PREFIX_LOAD_FAILED #{e.message}"
     nil
   end
 
