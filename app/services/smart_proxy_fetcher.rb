@@ -254,21 +254,28 @@ class SmartProxyFetcher
     font_refs_external  = css.scan(/url\s*\(\s*["']?https?:\/\//i)
                               .count { |u| !u.include?(@proxy_prefix) }
 
+    font_family_lato_count  = css.scan(/font-family\s*:\s*["']?Lato/i).length
+    font_family_serif_count = css.scan(/font-family\s*:[^;{}]*?(?:serif|Times\s+New\s+Roman)/i).length
+
     Rails.logger.info "[SP_FETCHER] CSS_RESPONSE " \
                       "target=#{target_url.inspect} " \
                       "base_origin=#{base_origin.inspect} " \
+                      "cdn_prefix_used=#{@cdn_prefix_used.inspect} " \
                       "origin_status=#{response.code} " \
                       "origin_ct=#{response["content-type"].inspect} " \
                       "body_bytes=#{css.bytesize} " \
                       "font_refs_before=#{font_refs_before} " \
                       "font_refs_proxified=#{font_refs_proxified} " \
-                      "font_refs_external=#{font_refs_external}"
+                      "font_refs_external=#{font_refs_external} " \
+                      "font_family_lato_count=#{font_family_lato_count} " \
+                      "font_family_serif_count=#{font_family_serif_count}"
 
     if font_refs_before > 0 && font_refs_proxified == 0
       Rails.logger.warn "[SP_FETCHER] CSS_FONT_REWRITE_ZERO " \
                         "target=#{target_url.inspect} " \
                         "font_refs_before=#{font_refs_before} " \
                         "base_origin=#{base_origin.inspect} " \
+                        "cdn_prefix_used=#{@cdn_prefix_used.inspect} " \
                         "(font URLs not proxified — check base_origin vs actual font URL domain)"
     end
 
@@ -535,12 +542,12 @@ class SmartProxyFetcher
       # Protocol-relative — treat as HTTPS for origin check.
       u = URI.parse("https:#{url}") rescue nil
       return url unless u
-      same_origin?(u, base_origin) ? proxy_path(u) : url
+      same_origin?(u, base_origin) ? proxify_uri(u) : url
 
     elsif url.start_with?("https://", "http://")
       u = URI.parse(url) rescue nil
       return url unless u
-      same_origin?(u, base_origin) ? proxy_path(u) : url
+      same_origin?(u, base_origin) ? proxify_uri(u) : url
 
     elsif url.start_with?("/")
       "#{@proxy_prefix}#{url}"
@@ -551,7 +558,7 @@ class SmartProxyFetcher
       # this avoids path-prefix ambiguity when the proxy root has no trailing slash.
       u = URI.join(source_uri, url) rescue nil
       return url unless u
-      same_origin?(u, base_origin) ? proxy_path(u) : u.to_s
+      same_origin?(u, base_origin) ? proxify_uri(u) : u.to_s
     end
   end
 
@@ -684,6 +691,23 @@ class SmartProxyFetcher
 
   def proxy_path(uri)
     "#{@proxy_prefix}#{uri.path}#{query_string(uri)}"
+  end
+
+  # Like proxy_path, but strips the CDN build prefix when @cdn_prefix_used is set.
+  # CDN-hosted CSS files contain font URLs whose URI path starts with the CDN build
+  # prefix (e.g. "/renderer/8a466bf2/_next/static/media/font.woff2"). proxy_path alone
+  # produces "/proxy/org/slug/renderer/8a466bf2/_next/static/media/font.woff2", which
+  # does NOT match the "_next/static/" branch in build_target_url → falls back to
+  # origin → 404 → Times New Roman.  Stripping the CDN build prefix here produces
+  # "/proxy/org/slug/_next/static/media/font.woff2", which correctly hits the CDN
+  # branch and fetches the font from the CDN.
+  def proxify_uri(u)
+    abs = u.to_s
+    if @cdn_prefix_used && abs.start_with?("#{@cdn_prefix_used}/")
+      "#{@proxy_prefix}#{abs[@cdn_prefix_used.length..]}"
+    else
+      proxy_path(u)
+    end
   end
 
   # Encode characters that are valid in decoded form (e.g. from Rails params) but
