@@ -74,10 +74,11 @@ class SmartProxyFetcher
   # @param path        [String]  sub-path appended to destination_url
   # @param api_base    [String]  base URL used by the injected analytics script
   def initialize(smart_proxy, path, api_base)
-    @smart_proxy  = smart_proxy
-    @path         = path.to_s.delete_prefix("/")
-    @api_base     = api_base
-    @proxy_prefix = smart_proxy.proxy_path_prefix
+    @smart_proxy     = smart_proxy
+    @path            = path.to_s.delete_prefix("/")
+    @api_base        = api_base
+    @proxy_prefix    = smart_proxy.proxy_path_prefix
+    @cdn_prefix_used = nil  # set by build_target_url when CDN branch is taken
   end
 
   def call
@@ -98,11 +99,7 @@ class SmartProxyFetcher
       elsif target_url.include?("/_next/static/media/")  then "NEXT_MEDIA"
       elsif target_url.include?("/_next/")               then "NEXT_OTHER"
       end
-    if next_resource_type
-      Rails.logger.info "[SP_FETCHER] #{next_resource_type}_REQUEST " \
-                        "path=#{@path.inspect} " \
-                        "target=#{target_url.inspect}"
-    end
+    # NEXT_STATIC_REQUEST is logged post-fetch (below) to include status + content_type.
 
     # For static assets, check the server-side cache before hitting origin.
     if ext_mime
@@ -123,6 +120,13 @@ class SmartProxyFetcher
 
     response = fetch_with_redirects(target_url)
     unless response
+      if next_resource_type
+        Rails.logger.error "[SP_FETCHER] NEXT_STATIC_FETCH_FAILED " \
+                           "type=#{next_resource_type} " \
+                           "path=#{@path.inspect} " \
+                           "cdn_prefix=#{@cdn_prefix_used.inspect} " \
+                           "target_url=#{target_url.inspect}"
+      end
       Rails.logger.error "[SP_FETCHER] fetch_failed target=#{target_url.inspect}"
       return Result.new(success: false, error: "fetch_failed")
     end
@@ -134,6 +138,16 @@ class SmartProxyFetcher
                       "content_type=#{raw_ct.inspect} " \
                       "ct_base=#{ct_base.inspect} " \
                       "target=#{target_url.inspect}"
+
+    if next_resource_type
+      Rails.logger.info "[SP_FETCHER] NEXT_STATIC_REQUEST " \
+                        "type=#{next_resource_type} " \
+                        "path=#{@path.inspect} " \
+                        "cdn_prefix=#{@cdn_prefix_used.inspect} " \
+                        "target_url=#{target_url.inspect} " \
+                        "status=#{response.code} " \
+                        "content_type=#{response['content-type'].inspect}"
+    end
 
     if next_resource_type && !%w[200 206].include?(response.code)
       Rails.logger.warn "[SP_FETCHER] NEXT_RESOURCE_MISSING " \
@@ -160,6 +174,18 @@ class SmartProxyFetcher
                             "origin_status=#{response.code} " \
                             "origin_ct=#{raw_ct.inspect} " \
                             "body_bytes=0 (HTML_MISMATCH — stylesheet returned error page)"
+        end
+        if ext_mime&.match?(/javascript|typescript/)
+          proxied_url  = "#{@proxy_prefix}/#{@path}"
+          body_preview = response.body.to_s.encode("UTF-8", invalid: :replace, undef: :replace)[0, 300]
+          Rails.logger.warn "[SP_FETCHER] smart_proxy_js_mime_mismatch " \
+                            "path=#{@path.inspect} " \
+                            "original_url=#{target_url.inspect} " \
+                            "proxied_url=#{proxied_url.inspect} " \
+                            "status=#{response.code} " \
+                            "content_type=#{raw_ct.inspect} " \
+                            "cdn_prefix=#{@cdn_prefix_used.inspect} " \
+                            "body_preview=#{body_preview.inspect}"
         end
         Result.new(success: true, body: "", content_type: ext_mime)
       elsif ext_mime == "text/css" && ct_base == "text/css"
@@ -660,6 +686,14 @@ class SmartProxyFetcher
     "#{@proxy_prefix}#{uri.path}#{query_string(uri)}"
   end
 
+  # Encode characters that are valid in decoded form (e.g. from Rails params) but
+  # illegal in a URI string. Bracket characters appear in Next.js dynamic-route chunk
+  # names (e.g. _next/static/chunks/pages/[slug]-abc123.js) and cause URI.parse to
+  # raise URI::InvalidURIError, which fetch_with_redirects silences as nil → 502.
+  def url_safe_path(path)
+    path.gsub(/[\[\]{}|\\^`]/) { |c| "%" + c.ord.to_s(16).upcase }
+  end
+
   def same_origin?(uri, base_origin)
     build_origin(uri) == base_origin
   end
@@ -692,7 +726,8 @@ class SmartProxyFetcher
     # the CDN.  Without this, origin returns 404/HTML → empty CSS → font fallback.
     if (@path.start_with?("_next/static/") || @path.start_with?("_next/data/")) &&
        (cdn = load_cdn_prefix)
-      target = "#{cdn}/#{@path}"
+      @cdn_prefix_used = cdn
+      target = "#{cdn}/#{url_safe_path(@path)}"
       Rails.logger.info "[SP_FETCHER] URL_RESOLVE_CDN input=#{@path.inspect} " \
                         "cdn=#{cdn.inspect} " \
                         "resolved=#{target.inspect}"
@@ -718,7 +753,7 @@ class SmartProxyFetcher
     #   origin_root "https://example.com" + path "css/file.css"
     #   → "https://example.com/css/file.css"          ← CORRECT
     origin_root = build_origin(URI.parse(base))
-    target      = "#{origin_root}/#{@path}"
+    target      = "#{origin_root}/#{url_safe_path(@path)}"
     Rails.logger.info "[SP_FETCHER] URL_RESOLVE input=#{@path.inspect} " \
                       "destination=#{base.inspect} " \
                       "origin=#{origin_root.inspect} " \
@@ -801,7 +836,12 @@ class SmartProxyFetcher
   def fetch_with_redirects(url, count = 0)
     return nil if count > MAX_REDIRECTS
 
-    uri = URI.parse(url) rescue nil
+    uri = begin
+      URI.parse(url)
+    rescue URI::InvalidURIError => e
+      Rails.logger.warn "[SP_FETCHER] URI_PARSE_FAILED url=#{url[0, 200].inspect} error=#{e.message}"
+      nil
+    end
     return nil unless uri && secure_uri?(uri)
 
     response = http_get(uri)
