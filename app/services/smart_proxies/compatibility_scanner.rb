@@ -16,13 +16,23 @@ module SmartProxies
       "security check"
     ].freeze
 
-    def initialize(smart_proxy)
-      @proxy = smart_proxy
-      @url   = smart_proxy.destination_url
+    # Accepts either an existing SmartProxy record or a plain URL string.
+    # When initialized with a URL string, `call` must not be used (no DB to write to);
+    # use `run` instead to get the result hash directly.
+    def initialize(smart_proxy_or_url)
+      if smart_proxy_or_url.is_a?(String)
+        @proxy = nil
+        @url   = smart_proxy_or_url
+      else
+        @proxy = smart_proxy_or_url
+        @url   = smart_proxy_or_url.destination_url
+      end
     end
 
+    # Runs the scan AND persists results to the SmartProxy record.
+    # Requires that the scanner was initialized with a SmartProxy, not a URL string.
     def call
-      result = analyze
+      result = run
       @proxy.update_columns(
         compatibility_status:     result[:status],
         compatibility_score:      result[:score],
@@ -30,13 +40,19 @@ module SmartProxies
         compatibility_checked_at: Time.current
       )
     rescue => e
-      Rails.logger.error "[CompatibilityScanner] proxy=#{@proxy.id} error=#{e.message}"
-      @proxy.update_columns(
+      Rails.logger.error "[CompatibilityScanner] proxy=#{@proxy&.id} error=#{e.message}"
+      @proxy&.update_columns(
         compatibility_status:     "incompatible",
         compatibility_score:      0,
         compatibility_report:     { checked_url: @url, error: e.message },
         compatibility_checked_at: Time.current
       )
+    end
+
+    # Runs the analysis and returns the result hash without touching the DB.
+    # Safe to call when initialized with a URL string.
+    def run
+      analyze
     end
 
     private

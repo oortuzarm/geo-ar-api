@@ -150,7 +150,8 @@ Rails.application.routes.draw do
     # frontend can reuse the same components for both surfaces.
     resources :smart_proxies do
       collection do
-        get :live_visits                                              # org-level active sessions
+        get  :live_visits                                             # org-level active sessions
+        post :scan                                                    # compatibility scan without creating a proxy
       end
       member do
         get "live_visits",         to: "smart_proxies#proxy_live_visits",   as: :proxy_live_visits

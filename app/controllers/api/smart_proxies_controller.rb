@@ -53,6 +53,28 @@ module Api
       end
     end
 
+    # POST /api/smart_proxies/scan
+    # Runs a compatibility scan against an arbitrary URL without creating a SmartProxy.
+    # Used by the frontend CompatibilityPanel before/during proxy creation.
+    def scan
+      url = params[:destination_url].to_s.strip
+      return render json: { error: "destination_url es requerido." },
+                    status: :unprocessable_entity if url.blank?
+
+      if (err = validate_scan_url(url))
+        return render json: { error: err }, status: :unprocessable_entity
+      end
+
+      result = SmartProxies::CompatibilityScanner.new(url).run
+
+      render json: {
+        status:         result[:status],
+        score:          result[:score],
+        notes:          result.dig(:report, :notes).to_a,
+        detected_risks: result.dig(:report, :detected_risks).to_a
+      }
+    end
+
     # DELETE /api/smart_proxies/:id
     def destroy
       Rails.logger.info "[SmartProxy] smart_proxy_destroy_requested proxy_id=#{@smart_proxy.id} name=#{@smart_proxy.name.inspect} user_id=#{current_user.id}"
@@ -251,6 +273,32 @@ module Api
 
     def smart_proxy_params
       params.permit(:name, :slug, :destination_url, :active, :custom_domain)
+    end
+
+    # Returns an error string if the URL is not safe to scan, nil otherwise.
+    def validate_scan_url(url)
+      return "La URL debe comenzar con http:// o https://" unless url.match?(/\Ahttps?:\/\/.+/i)
+      return "La URL supera el límite de 2048 caracteres" if url.length > 2048
+
+      uri  = URI.parse(url)
+      host = uri.host.to_s.downcase
+
+      blocked_hosts = %w[localhost 127.0.0.1 ::1 0.0.0.0]
+      return "No se puede escanear direcciones locales" if blocked_hosts.include?(host)
+
+      private_ranges = [
+        /\A10\.\d+\.\d+\.\d+\z/,
+        /\A172\.(1[6-9]|2\d|3[01])\.\d+\.\d+\z/,
+        /\A192\.168\.\d+\.\d+\z/,
+        /\A169\.254\.\d+\.\d+\z/,
+        /\Afc[0-9a-f]{2}:/i,
+        /\Afd[0-9a-f]{2}:/i,
+      ]
+      return "No se puede escanear direcciones IP privadas" if private_ranges.any? { |p| p.match?(host) }
+
+      nil
+    rescue URI::InvalidURIError
+      "URL inválida"
     end
 
     # ── Analytics helpers ─────────────────────────────────────────────────────
