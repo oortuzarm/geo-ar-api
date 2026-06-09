@@ -217,13 +217,34 @@ class SmartProxyFetcher
     raw         = decompress(response)
     cs          = extract_charset_from_header(response)
     css         = decode_to_utf8(raw, cs)
-    css         = rewrite_css(css, base_origin, source_uri)
+
+    # Count font-face src URLs before rewriting for diagnostic comparison.
+    font_refs_before = css.scan(/url\s*\(\s*["']?[^"')]*\.(?:woff2?|ttf|otf|eot)/i).length
+
+    css = rewrite_css(css, base_origin, source_uri)
+
+    # Count how many font src URLs ended up proxified vs staying external.
+    font_refs_proxified = css.scan(/url\s*\(\s*["']?#{Regexp.escape(@proxy_prefix)}/i).length
+    font_refs_external  = css.scan(/url\s*\(\s*["']?https?:\/\//i)
+                              .count { |u| !u.include?(@proxy_prefix) }
 
     Rails.logger.info "[SP_FETCHER] CSS_RESPONSE " \
                       "target=#{target_url.inspect} " \
+                      "base_origin=#{base_origin.inspect} " \
                       "origin_status=#{response.code} " \
                       "origin_ct=#{response["content-type"].inspect} " \
-                      "body_bytes=#{css.bytesize}"
+                      "body_bytes=#{css.bytesize} " \
+                      "font_refs_before=#{font_refs_before} " \
+                      "font_refs_proxified=#{font_refs_proxified} " \
+                      "font_refs_external=#{font_refs_external}"
+
+    if font_refs_before > 0 && font_refs_proxified == 0
+      Rails.logger.warn "[SP_FETCHER] CSS_FONT_REWRITE_ZERO " \
+                        "target=#{target_url.inspect} " \
+                        "font_refs_before=#{font_refs_before} " \
+                        "base_origin=#{base_origin.inspect} " \
+                        "(font URLs not proxified — check base_origin vs actual font URL domain)"
+    end
 
     Result.new(success: true, body: css, content_type: "text/css; charset=utf-8")
   end
@@ -433,6 +454,22 @@ class SmartProxyFetcher
     end
     Rails.logger.info "[SP_FETCHER] STYLESHEET_COUNT_AFTER count=#{seen_hrefs.size}"
 
+    # Diagnostic: count how many final stylesheet hrefs are still external (CDN/not proxified).
+    # These CSS files load directly in the browser without going through the proxy.
+    # Any @font-face rules inside them will have UNPROXIFIED font URLs.
+    proxified_sheets  = seen_hrefs.keys.count { |h| h.to_s.start_with?(@proxy_prefix) }
+    external_sheets   = seen_hrefs.keys.count { |h| h.to_s.start_with?("http://", "https://", "//") }
+    Rails.logger.info "[SP_FETCHER] STYLESHEET_PROXY_SPLIT " \
+                      "proxified=#{proxified_sheets} " \
+                      "external_cdn=#{external_sheets} " \
+                      "proxy_prefix=#{@proxy_prefix.inspect}"
+    if external_sheets > 0
+      Rails.logger.warn "[SP_FETCHER] STYLESHEET_CDN_BYPASS " \
+                        "count=#{external_sheets} " \
+                        "(these CSS files load from CDN directly — " \
+                        "their @font-face URLs will NOT be rewritten through proxy)"
+    end
+
     html
   end
 
@@ -635,6 +672,16 @@ class SmartProxyFetcher
       return target
     end
 
+    # Warn when a _next/ path falls through to origin — this almost certainly
+    # means the CDN prefix was never cached (NullStore, cross-process miss, or
+    # the HTML was not processed through this fetcher first).
+    if @path.start_with?("_next/static/") || @path.start_with?("_next/data/")
+      Rails.logger.warn "[SP_FETCHER] NEXT_PATH_CDN_MISS " \
+                        "path=#{@path.inspect} " \
+                        "proxy_id=#{@smart_proxy.id} " \
+                        "(falling back to origin — font CSS may 404 → Times New Roman)"
+    end
+
     # Sub-resource paths are ALWAYS resolved against the origin root (scheme://host),
     # never against destination_url's full path. proxy_path() stores the absolute path
     # component of the original URL (e.g. "/css/file.css" → "css/file.css" in @path),
@@ -664,15 +711,35 @@ class SmartProxyFetcher
 
   # Persist the CDN base URL so subsequent asset sub-requests can use it.
   def store_cdn_prefix(cdn_base)
-    Rails.cache.write(cdn_prefix_cache_key, cdn_base, expires_in: 2.hours)
-    Rails.logger.info "[SP_FETCHER] CDN_PREFIX_STORED cdn=#{cdn_base.inspect}"
+    ok = Rails.cache.write(cdn_prefix_cache_key, cdn_base, expires_in: 2.hours)
+    if ok
+      Rails.logger.info "[SP_FETCHER] CDN_PREFIX_STORED " \
+                        "cdn=#{cdn_base.inspect} " \
+                        "key=#{cdn_prefix_cache_key.inspect} " \
+                        "store_class=#{Rails.cache.class.name}"
+    else
+      Rails.logger.warn "[SP_FETCHER] CDN_PREFIX_STORE_NOOP " \
+                        "cdn=#{cdn_base.inspect} " \
+                        "key=#{cdn_prefix_cache_key.inspect} " \
+                        "store_class=#{Rails.cache.class.name} " \
+                        "(write returned false — NullStore or cache full? _next/ paths will fall back to origin)"
+    end
   rescue => e
     Rails.logger.warn "[SP_FETCHER] CDN_PREFIX_STORE_FAILED #{e.message}"
   end
 
   # Read the CDN base URL from cache. Returns nil on miss or error.
   def load_cdn_prefix
-    Rails.cache.read(cdn_prefix_cache_key)
+    key = cdn_prefix_cache_key
+    val = Rails.cache.read(key)
+    if val
+      Rails.logger.info "[SP_FETCHER] CDN_PREFIX_HIT key=#{key.inspect} cdn=#{val.inspect}"
+    else
+      Rails.logger.warn "[SP_FETCHER] CDN_PREFIX_MISS key=#{key.inspect} " \
+                        "store_class=#{Rails.cache.class.name} " \
+                        "(no CDN URL cached — _next/ paths will resolve against origin)"
+    end
+    val
   rescue => e
     Rails.logger.warn "[SP_FETCHER] CDN_PREFIX_LOAD_FAILED #{e.message}"
     nil
