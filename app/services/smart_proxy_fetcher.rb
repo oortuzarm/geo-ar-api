@@ -338,8 +338,8 @@ class SmartProxyFetcher
       href_m = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)
       rel_m  = tag.match(/\brel\s*=\s*["']?(\w+)["']?/i)
       Rails.logger.info "[SP_FETCHER] CSS_PRELOAD_LINK " \
-                        "rel=#{rel_m&.dig(1).inspect} " \
-                        "href=#{href_m&.dig(2).inspect}"
+                        "rel=#{rel_m&.[](1).inspect} " \
+                        "href=#{href_m&.[](2).inspect}"
     end
 
     # Remove <base> — the proxy URL must serve as the implicit base.
