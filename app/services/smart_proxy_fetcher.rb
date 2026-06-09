@@ -35,6 +35,12 @@ class SmartProxyFetcher
                   application/vnd.ms-fontobject application/x-font-woff
                   application/x-font-ttf application/font-woff application/font-woff2].freeze
 
+  # Wix Thunderbolt detection and image CDN routing.
+  WIX_THUNDERBOLT_MARKER = "_partials/wix-thunderbolt/".freeze
+  WIX_STATIC_CDN         = "https://static.wixstatic.com".freeze
+  # Matches Wix image-transform path prefixes (quality_auto/... or v1/fill/...).
+  WIX_IMAGE_PATH_RE      = %r{\A(?:quality_auto(?:[,/]|$)|v\d+/(?:fill|crop|fit|thumb)/)}i.freeze
+
   # URL extensions that must never be processed as HTML.
   # Keyed by extension (lowercase, with dot), value is the fallback MIME type used
   # when the origin returns text/html instead of the correct asset type.
@@ -128,6 +134,18 @@ class SmartProxyFetcher
                            "target_url=#{target_url.inspect}"
       end
       Rails.logger.error "[SP_FETCHER] fetch_failed target=#{target_url.inspect}"
+      # For known asset types (images, fonts, JS, CSS…), degrade to empty body instead
+      # of returning a 502 to the browser.  A broken image/missing asset is far less
+      # disruptive to the page layout than a proxy error page, and avoids the cascade
+      # where one failed sub-resource causes the whole page to be replaced by a 502.
+      if ext_mime
+        Rails.logger.warn "[SP_FETCHER] SMART_PROXY_WIX_IMAGE_FETCH " \
+                          "path=#{@path.inspect} " \
+                          "target=#{target_url.inspect} " \
+                          "ext_mime=#{ext_mime.inspect} " \
+                          "status=nil degrading_to_empty_body=true"
+        return Result.new(success: true, body: "".b, content_type: ext_mime)
+      end
       return Result.new(success: false, error: "fetch_failed")
     end
 
@@ -333,6 +351,7 @@ class SmartProxyFetcher
     html  = rewrite_html(html, target_url)
     html  = strip_inline_csp(html)
     html  = normalize_meta_charset(html)
+    html  = inject_wix_compat(html)     # Wix Worker shim + pathname patch (no-op on non-Wix)
     html  = inject_script(html)
     html  = inject_lato_fallback(html)
     Result.new(success: true, body: html, content_type: "text/html; charset=utf-8")
@@ -574,6 +593,26 @@ class SmartProxyFetcher
                         "their @font-face URLs will NOT be rewritten through proxy)"
     end
 
+    # Wix Thunderbolt detection: cache the flag so sub-resource requests can use it.
+    if html.include?(WIX_THUNDERBOLT_MARKER)
+      store_wix_detected unless load_wix_detected
+      Rails.logger.info "[SP_FETCHER] SMART_PROXY_WIX_DETECTED proxy_id=#{@smart_proxy.id}"
+
+      # Scan for Worker/ServiceWorker constructor calls in the HTML so we can log
+      # which ones were statically rewritable vs. need the runtime JS shim.
+      html.scan(/new\s+(?:Worker|SharedWorker)\s*\(\s*["'](.*?)["']/i).each do |m|
+        url = m[0].to_s
+        next if url.empty?
+        if url.start_with?(base_origin) || (url.start_with?("/") && !url.start_with?("//"))
+          Rails.logger.info "[SP_FETCHER] SMART_PROXY_WIX_WORKER_REWRITE " \
+                            "url=#{url[0, 200].inspect} (statically rewritten)"
+        else
+          Rails.logger.warn "[SP_FETCHER] SMART_PROXY_WIX_WORKER_BLOCKED " \
+                            "url=#{url[0, 200].inspect} reason=cross_origin_literal"
+        end
+      end
+    end
+
     html
   end
 
@@ -799,6 +838,17 @@ class SmartProxyFetcher
       Rails.logger.info "[SP_FETCHER] URL_RESOLVE_CDN input=#{@path.inspect} " \
                         "cdn=#{cdn.inspect} " \
                         "resolved=#{target.inspect}"
+      return target
+    end
+
+    # Wix image-transform paths (quality_auto/..., v1/fill/...) are served by
+    # static.wixstatic.com, not by the origin host.  Routing them to the origin
+    # returns 502 because Wix's image layer lives on a separate CDN edge.
+    if WIX_IMAGE_PATH_RE.match?(@path) && wix_site?
+      target = "#{WIX_STATIC_CDN}/#{url_safe_path(@path)}"
+      Rails.logger.info "[SP_FETCHER] SMART_PROXY_WIX_ASSET_REWRITE " \
+                        "path=#{@path.inspect} " \
+                        "target=#{target.inspect}"
       return target
     end
 
@@ -1194,5 +1244,155 @@ class SmartProxyFetcher
   rescue => e
     Rails.logger.error "[SP_FETCHER] inject_lato_fallback error=#{e.message}"
     html
+  end
+
+  # ── Wix Thunderbolt compatibility shim ────────────────────────────────────
+  # Injected into <head> before any other scripts so the patches are active
+  # before Wix Thunderbolt initialises.
+  #
+  # 1. Worker / SharedWorker constructor shim:
+  #    Rewrites same-origin worker script URLs through the proxy prefix so
+  #    the browser can load them from go.ubyca.com.  Falls back to a no-op
+  #    stub when construction still fails (avoids the fatal "cannot be
+  #    accessed from origin" error that breaks page layout).
+  #
+  # 2. navigator.serviceWorker.register shim:
+  #    Same rewrite strategy; silently rejects cross-origin registrations
+  #    that can't be rewritten (Wix offline caching degrades, layout survives).
+  #
+  # 3. Location.prototype.pathname patch:
+  #    Wix's pageIdMiddleware reads window.location.pathname to look up the
+  #    current page in the site map.  It sees /proxy/org/slug instead of /,
+  #    finds nothing, and logs a warning.  We strip the proxy prefix so Wix
+  #    sees the canonical path and can resolve the correct page ID.
+  #    NOTE: monitor sub-page navigation — if Wix constructs new History
+  #    paths from location.pathname, stripping the prefix could break pushState.
+
+  def inject_wix_compat(html)
+    return html unless html.include?(WIX_THUNDERBOLT_MARKER) || load_wix_detected
+
+    pp          = @proxy_prefix
+    dest_origin = build_origin(URI.parse(@smart_proxy.destination_url)) rescue ""
+
+    Rails.logger.info "[SP_FETCHER] SMART_PROXY_WIX_PAGE_ID_PATH_FIX " \
+                      "proxy_id=#{@smart_proxy.id} " \
+                      "proxy_prefix=#{pp.inspect} " \
+                      "dest_origin=#{dest_origin.inspect}"
+
+    script = <<~HTML
+      <script id="ubyca-wix-compat">
+      (function(){
+        var _pp   = #{pp.to_json};
+        var _dest = #{dest_origin.to_json};
+
+        // 1. Rewrite a URL through the proxy prefix.
+        function _proxify(url) {
+          if (!url) return url;
+          var s = String(url);
+          // Root-relative paths: /foo → /proxy/org/slug/foo
+          if (s.charAt(0) === '/' && s.charAt(1) !== '/') return _pp + s;
+          try {
+            var u = new URL(s);
+            if (u.origin === _dest) return _pp + u.pathname + u.search + u.hash;
+          } catch(_e) {}
+          return s;
+        }
+
+        // 2. Worker / SharedWorker constructor shim.
+        ['Worker','SharedWorker'].forEach(function(name) {
+          var Orig = window[name];
+          if (!Orig) return;
+          window[name] = function(scriptURL, opts) {
+            var rewritten = _proxify(String(scriptURL || ''));
+            try {
+              return new Orig(rewritten, opts);
+            } catch(e) {
+              console.warn('[UbycaProxy] SMART_PROXY_WIX_WORKER_BLOCKED', name, String(scriptURL), e.message);
+              // Return a no-op stub so the page continues rendering.
+              return {
+                postMessage:        function(){},
+                terminate:          function(){},
+                addEventListener:    function(){},
+                removeEventListener: function(){},
+                dispatchEvent:      function(){ return false; },
+                onmessage: null, onerror: null
+              };
+            }
+          };
+          try { window[name].prototype = Orig.prototype; } catch(_e) {}
+        });
+
+        // 3. ServiceWorker.register shim.
+        try {
+          if (navigator.serviceWorker) {
+            var _origReg = navigator.serviceWorker.register.bind(navigator.serviceWorker);
+            navigator.serviceWorker.register = function(scriptURL, opts) {
+              var rewritten = _proxify(String(scriptURL || ''));
+              return _origReg(rewritten, opts).catch(function(e) {
+                console.warn('[UbycaProxy] SMART_PROXY_WIX_WORKER_BLOCKED SW', String(scriptURL), e.message);
+                return Promise.reject(e);
+              });
+            };
+          }
+        } catch(_e) {}
+
+        // 4. Location.prototype.pathname patch for pageIdMiddleware.
+        try {
+          var _ld = Object.getOwnPropertyDescriptor(Location.prototype, 'pathname');
+          if (_ld && _ld.get) {
+            Object.defineProperty(Location.prototype, 'pathname', {
+              get: function() {
+                var p = _ld.get.call(this);
+                if (p === _pp || p.indexOf(_pp + '/') === 0) {
+                  return p.slice(_pp.length) || '/';
+                }
+                return p;
+              },
+              configurable: true
+            });
+          }
+        } catch(_e) {}
+      })();
+      </script>
+    HTML
+
+    # Inject immediately after <head> so shims are active before Wix scripts.
+    if html.match?(/<head\b[^>]*>/i)
+      html.sub(/<head\b[^>]*>/i) { |m| "#{m}\n#{script}" }
+    elsif html.include?("<head>")
+      html.sub("<head>", "<head>\n#{script}")
+    else
+      html
+    end
+  rescue => e
+    Rails.logger.error "[SP_FETCHER] inject_wix_compat error=#{e.message}"
+    html
+  end
+
+  # ── Wix detection cache ────────────────────────────────────────────────────
+
+  def wix_cache_key
+    "smart_proxy/wix_detected/#{@smart_proxy.id}"
+  end
+
+  def store_wix_detected
+    Rails.cache.write(wix_cache_key, true, expires_in: 2.hours)
+  rescue => e
+    Rails.logger.warn "[SP_FETCHER] WIX_CACHE_STORE_FAILED #{e.message}"
+  end
+
+  def load_wix_detected
+    Rails.cache.read(wix_cache_key)
+  rescue => e
+    Rails.logger.warn "[SP_FETCHER] WIX_CACHE_LOAD_FAILED #{e.message}"
+    nil
+  end
+
+  # Returns true when the proxy destination is a Wix-hosted site.
+  # Checks both the well-known .wixsite.com domain and a cached detection flag
+  # set when we've seen WIX_THUNDERBOLT_MARKER in a previous HTML response.
+  def wix_site?
+    host = URI.parse(@smart_proxy.destination_url).host.to_s.downcase rescue ""
+    host.end_with?(".wixsite.com") || load_wix_detected
   end
 end
