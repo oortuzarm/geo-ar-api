@@ -283,6 +283,23 @@ class SmartProxyFetcher
     font_family_lato_count  = css.scan(/font-family\s*:\s*["']?Lato/i).length
     font_family_serif_count = css.scan(/font-family\s*:[^;{}]*?(?:serif|Times\s+New\s+Roman)/i).length
 
+    # Audit @font-face blocks for Lato: extract family + src from each block.
+    lato_font_face_srcs = css.scan(/@font-face\s*\{([^}]*)\}/im).map(&:first)
+      .select  { |b| b.match?(/font-family\s*:[^;]*Lato/i) }
+      .map     { |b| b.match(/src\s*:\s*(.*?);/im)&.then { |m| m[1].strip[0, 200] } || "src_missing" }
+
+    if lato_font_face_srcs.any?
+      Rails.logger.info "[SP_FETCHER] LATO_FONT_FACE_FOUND " \
+                        "count=#{lato_font_face_srcs.size} " \
+                        "target=#{target_url.inspect} " \
+                        "srcs=#{lato_font_face_srcs.inspect}"
+    else
+      Rails.logger.warn "[SP_FETCHER] LATO_FONT_FACE_MISSING " \
+                        "target=#{target_url.inspect} " \
+                        "font_family_lato_count=#{font_family_lato_count} " \
+                        "(this CSS file has no @font-face for Lato)"
+    end
+
     Rails.logger.info "[SP_FETCHER] CSS_RESPONSE " \
                       "target=#{target_url.inspect} " \
                       "base_origin=#{base_origin.inspect} " \
@@ -317,6 +334,7 @@ class SmartProxyFetcher
     html  = strip_inline_csp(html)
     html  = normalize_meta_charset(html)
     html  = inject_script(html)
+    html  = inject_lato_fallback(html)
     Result.new(success: true, body: html, content_type: "text/html; charset=utf-8")
   end
 
@@ -1109,5 +1127,72 @@ class SmartProxyFetcher
       })();
       </script>
     HTML
+  end
+
+  # ── Lato font-face fallback injection ─────────────────────────────────────
+
+  def inject_lato_fallback(html)
+    dest_host = URI.parse(@smart_proxy.destination_url).host.to_s rescue ""
+    unless dest_host.include?("falabella.com")
+      Rails.logger.debug "[SP_FETCHER] LATO_FONT_FACE_SKIPPED reason=not_falabella proxy_id=#{@smart_proxy.id}"
+      return html
+    end
+
+    # [^}]* matches across newlines — stops at first closing brace, safe for @font-face.
+    inline_has_lato = html.match?(/@font-face[^}]*font-family\s*:[^;]*Lato/im)
+
+    if inline_has_lato
+      Rails.logger.info "[SP_FETCHER] LATO_FONT_FACE_FOUND inline=true " \
+                        "proxy_id=#{@smart_proxy.id} " \
+                        "destination=#{dest_host.inspect}"
+      return html
+    end
+
+    pp = @proxy_prefix
+    fallback_css = <<~CSS
+      @font-face {
+        font-family: 'Lato';
+        src: url('#{pp}/a/fa/listing/static/fonts/Lato-Regular.woff2') format('woff2');
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Lato';
+        src: url('#{pp}/a/fa/listing/static/fonts/Lato-Bold.woff2') format('woff2');
+        font-weight: 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Lato';
+        src: url('#{pp}/a/fa/listing/static/fonts/Lato-Light.woff2') format('woff2');
+        font-weight: 300;
+        font-style: normal;
+        font-display: swap;
+      }
+      body, body * {
+        font-family: Lato, sans-serif;
+      }
+    CSS
+
+    style_block = "<style id=\"ubyca-lato-fallback\">\n#{fallback_css}</style>"
+
+    injected = if html.include?("</head>")
+      html.sub("</head>", "#{style_block}\n</head>")
+    elsif html.match?(/<body/i)
+      html.sub(/<body/i, "#{style_block}\n<body")
+    else
+      html + "\n" + style_block
+    end
+
+    Rails.logger.info "[SP_FETCHER] LATO_FONT_FACE_INJECTED " \
+                      "proxy_id=#{@smart_proxy.id} " \
+                      "destination=#{dest_host.inspect} " \
+                      "inline_was_found=false"
+    injected
+  rescue => e
+    Rails.logger.error "[SP_FETCHER] inject_lato_fallback error=#{e.message}"
+    html
   end
 end
