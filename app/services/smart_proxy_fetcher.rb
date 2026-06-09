@@ -150,12 +150,16 @@ class SmartProxyFetcher
     end
 
     if next_resource_type && !%w[200 206].include?(response.code)
+      body_preview_non2xx = response.body.to_s.dup
+                                    .force_encoding("BINARY")
+                                    .encode("UTF-8", "BINARY", invalid: :replace, undef: :replace)[0, 200]
       Rails.logger.warn "[SP_FETCHER] NEXT_RESOURCE_MISSING " \
                         "type=#{next_resource_type} " \
                         "status=#{response.code} " \
                         "target=#{target_url.inspect} " \
                         "ct=#{raw_ct.inspect} " \
-                        "body_bytes=#{response.body.to_s.bytesize}"
+                        "body_bytes=#{response.body.to_s.bytesize} " \
+                        "body_preview=#{body_preview_non2xx.inspect}"
     end
 
     result = if ext_mime
@@ -194,6 +198,28 @@ class SmartProxyFetcher
         # Direct requests from the browser to the origin for fonts trigger CORS errors.
         Rails.logger.info "[SP_FETCHER] CSS_REWRITE target=#{target_url.inspect}"
         serve_css(response, target_url)
+      elsif ext_mime&.match?(/javascript|typescript/) &&
+            response.body.to_s.dup.force_encoding("BINARY")
+                        .encode("UTF-8", "BINARY", invalid: :replace, undef: :replace)[0, 50]
+                        .strip.start_with?("<")
+        # CDN returned HTML with a non-text/html content-type (bot challenge, auth
+        # redirect that preserved the original MIME, etc.).  ct_base check above only
+        # catches the text/html case; this catches everything else where the body IS
+        # HTML regardless of the declared content-type.
+        # Serving HTML as JS causes "Unexpected token '<'" → React cannot hydrate →
+        # CSS-in-JS / CSS module injection never runs → default serif font wins.
+        body_preview = response.body.to_s.dup.force_encoding("BINARY")
+                                   .encode("UTF-8", "BINARY", invalid: :replace, undef: :replace)[0, 300]
+        proxied_url  = "#{@proxy_prefix}/#{@path}"
+        Rails.logger.warn "[SP_FETCHER] smart_proxy_js_html_body " \
+                          "path=#{@path.inspect} " \
+                          "original_url=#{target_url.inspect} " \
+                          "proxied_url=#{proxied_url.inspect} " \
+                          "status=#{response.code} " \
+                          "content_type=#{raw_ct.inspect} " \
+                          "cdn_prefix=#{@cdn_prefix_used.inspect} " \
+                          "body_preview=#{body_preview.inspect}"
+        Result.new(success: true, body: "", content_type: ext_mime)
       else
         Rails.logger.info "[SP_FETCHER] BINARY_ASSET target=#{target_url.inspect} ct=#{raw_ct.inspect}"
         serve_binary(response, raw_ct.presence || ext_mime)
