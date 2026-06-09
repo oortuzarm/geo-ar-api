@@ -337,8 +337,17 @@ class SmartProxyFetcher
   # ── HTML rewriting ─────────────────────────────────────────────────────────
 
   def rewrite_html(html, source_url)
-    source_uri  = URI.parse(source_url)
-    base_origin = build_origin(source_uri)
+    source_uri       = URI.parse(source_url)
+    base_origin      = build_origin(source_uri)
+
+    # Pre-scan __NEXT_DATA__ to extract the CDN assetPrefix before href rewriting.
+    # When the prefix is an absolute CDN URL (e.g. https://static.falabella.io/renderer/abc),
+    # any stylesheet or preload href that starts with it belongs to this site's asset pipeline
+    # and must be proxified so the proxy can rewrite @font-face URLs inside those CSS files.
+    # Without this, 3+ stylesheets load directly from the CDN, bypassing URL rewriting entirely.
+    cdn_prefix_local = extract_next_cdn_prefix(html)
+    Rails.logger.info "[SP_FETCHER] CDN_PREFIX_LOCAL_DETECT " \
+                      "cdn_prefix=#{cdn_prefix_local.inspect}"
 
     # Collect and log stylesheet <link> tags BEFORE rewriting.
     before_stylesheets = []
@@ -356,11 +365,14 @@ class SmartProxyFetcher
     html.scan(/<link\b[^>]*>/i) do |tag|
       next unless tag.match?(/\brel\s*=\s*["']?(?:preload|prefetch)["']?/i)
       next unless tag.match?(/\bas\s*=\s*["']?style["']?/i)
-      href_m = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)
-      rel_m  = tag.match(/\brel\s*=\s*["']?(\w+)["']?/i)
+      href_m       = tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)
+      rel_m        = tag.match(/\brel\s*=\s*["']?(\w+)["']?/i)
+      href         = href_m&.[](2)
+      will_proxify = cdn_prefix_local && href.to_s.start_with?(cdn_prefix_local)
       Rails.logger.info "[SP_FETCHER] CSS_PRELOAD_LINK " \
                         "rel=#{rel_m&.[](1).inspect} " \
-                        "href=#{href_m&.[](2).inspect}"
+                        "href=#{href.inspect} " \
+                        "will_proxify=#{will_proxify}"
     end
 
     # Remove <base> — the proxy URL must serve as the implicit base.
@@ -368,8 +380,23 @@ class SmartProxyFetcher
 
     # Rewrite URL-bearing attributes.
     # Covers standard attrs + lazy-load patterns + plugin data attributes (Real3D, etc.).
+    # CDN asset-prefix URLs are also rewritten when a CDN prefix was detected above —
+    # this ensures <link rel="stylesheet">, <link rel="preload" as="style">, and any other
+    # CDN-hosted asset originally served via the CDN prefix routes through the proxy so
+    # that font URL rewriting can happen inside those CSS files.
     html = html.gsub(/(\s(?:href|src|action|data-src|data-bg|poster|data-pdf|data-file|data-url|data-href|data-link)\s*=\s*)(["'])(.*?)\2/im) do
-      "#{$1}#{$2}#{rewrite_url($3, base_origin, source_uri)}#{$2}"
+      url       = $3
+      rewritten = if cdn_prefix_local && url.start_with?(cdn_prefix_local)
+        # Absolute CDN URL belonging to this site's assetPrefix pipeline.
+        # Strip the CDN base and replace with the proxy prefix so the request
+        # routes through the proxy and font URLs inside CSS get rewritten.
+        # Example: "https://static.falabella.io/renderer/abc/_next/static/css/x.css"
+        #       →  "/proxy/org/slug/_next/static/css/x.css"
+        "#{@proxy_prefix}#{url[cdn_prefix_local.length..]}"
+      else
+        rewrite_url(url, base_origin, source_uri)
+      end
+      "#{$1}#{$2}#{rewritten}#{$2}"
     end
 
     # srcset / data-srcset: "url1 1x, url2 2x" or "url1 320w, url2 640w"
@@ -699,6 +726,24 @@ class SmartProxyFetcher
     target
   rescue => e
     Rails.logger.error "[SP_FETCHER] URL_RESOLVE_ERROR path=#{@path.inspect} error=#{e.message}"
+    nil
+  end
+
+  # ── CDN prefix helpers ────────────────────────────────────────────────────
+
+  # Read-only scan of raw HTML to extract an absolute assetPrefix from __NEXT_DATA__.
+  # Returns the CDN base URL (no trailing slash), or nil if none / relative prefix.
+  # Called at the start of rewrite_html so CDN stylesheet hrefs can be proxified
+  # in the same attribute-rewriting pass, before __NEXT_DATA__ itself is processed.
+  def extract_next_cdn_prefix(html)
+    m = html.match(
+      /<script\b[^>]*\bid\s*=\s*["']__NEXT_DATA__["'][^>]*>(.*?)<\/script>/im
+    )
+    return nil unless m
+    prefix = JSON.parse(m[1])["assetPrefix"].to_s
+    return nil unless prefix.start_with?("http://", "https://", "//")
+    (prefix.start_with?("//") ? "https:#{prefix}" : prefix).chomp("/")
+  rescue
     nil
   end
 
