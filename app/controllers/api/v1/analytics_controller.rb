@@ -121,6 +121,35 @@ module Api
         })
       end
 
+      # GET /api/v1/projects/:id/analytics/outside_areas
+      #   ?mode=historical|live    (default: historical)
+      #   &from=YYYY-MM-DD         (historical only)
+      #   &to=YYYY-MM-DD           (historical only)
+      #
+      # Returns GPS activity recorded outside all active GeoPoints of the project.
+      # "Actividad registrada fuera de los GeoPoints activos del proyecto."
+      # Inactive GeoPoints are excluded from the boundary check; a coordinate that
+      # falls only inside inactive GeoPoints IS included in the result.
+      def outside_areas
+        mode   = params[:mode].to_s == "live" ? :live : :historical
+        result = Api::V1::ActivityOutsideAreasService.new(
+          @project,
+          mode: mode,
+          from: parse_date_param(:from),
+          to:   parse_date_param(:to)
+        ).call
+
+        render_ok({
+          mode:     mode,
+          hotspots: result.hotspots.map { |h| serialize_outside_hotspot(h) },
+          meta: {
+            totalPoints:           result.total_points,
+            outsidePoints:         result.outside_points,
+            activeGeoPointsCount:  result.active_geo_points_count
+          }
+        })
+      end
+
       # GET /api/v1/projects/:id/analytics/intensity
       #
       # Returns total historical radius_enter count per location with coordinates.
@@ -148,6 +177,16 @@ module Api
 
       def set_project!
         @project = organization_projects.includes(:user).find(params[:id])
+      end
+
+      def serialize_outside_hotspot(hotspot)
+        {
+          lat:          hotspot.lat,
+          lng:          hotspot.lng,
+          count:        hotspot.count,
+          intensity:    hotspot.intensity,
+          radiusMeters: hotspot.radius_meters
+        }
       end
 
       # English 404 for API v1, overrides the Spanish default from AnalyticsQueryable.

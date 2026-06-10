@@ -247,4 +247,101 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
     pt_a = response.parsed_body["data"].find { |p| p["locationId"] == @point_a.id }
     assert_equal 2, pt_a["entryCount"]
   end
+
+  # ── GET /api/v1/projects/:id/analytics/outside_areas ─────────────────────────
+
+  test "outside_areas: returns 401 without auth" do
+    get "/api/v1/projects/#{@project.id}/analytics/outside_areas"
+    assert_response :unauthorized
+  end
+
+  test "outside_areas: returns correct response structure" do
+    get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header
+    assert_response :ok
+
+    data = response.parsed_body["data"]
+    assert data.key?("mode"),     "missing mode"
+    assert data.key?("hotspots"), "missing hotspots"
+    assert data.key?("meta"),     "missing meta"
+    assert data["meta"].key?("totalPoints")
+    assert data["meta"].key?("outsidePoints")
+    assert data["meta"].key?("activeGeoPointsCount")
+  end
+
+  test "outside_areas: defaults to historical mode" do
+    get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header
+    assert_response :ok
+    assert_equal "historical", response.parsed_body["data"]["mode"]
+  end
+
+  test "outside_areas: accepts live mode" do
+    get "/api/v1/projects/#{@project.id}/analytics/outside_areas?mode=live", headers: auth_header
+    assert_response :ok
+    assert_equal "live", response.parsed_body["data"]["mode"]
+  end
+
+  test "outside_areas: excludes GPS events inside active GeoPoints" do
+    # Both setup events for point_a (-34.0, -58.0) have nil lat/lng —
+    # add an event with GPS that falls inside point_a (active, default 50 m radius).
+    AnalyticsEvent.create!(
+      geo_project: @project, geo_point: @point_a,
+      event_type: "radius_enter", session_id: "inside-active",
+      event_date: Date.today, latitude: -34.0, longitude: -58.0
+    )
+
+    get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header
+    assert_response :ok
+
+    data = response.parsed_body["data"]
+    assert_equal 0, data["meta"]["outsidePoints"],
+      "event inside active GeoPoint must be excluded from outside_areas"
+  end
+
+  test "outside_areas: includes GPS events outside all active GeoPoints" do
+    AnalyticsEvent.create!(
+      geo_project: @project, geo_point: @point_a,
+      event_type: "radius_enter", session_id: "outside-all",
+      event_date: Date.today, latitude: -35.0, longitude: -59.0  # far away
+    )
+
+    get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header
+    assert_response :ok
+
+    data = response.parsed_body["data"]
+    assert_equal 1, data["meta"]["outsidePoints"]
+    assert_equal 1, data["hotspots"].size
+    hotspot = data["hotspots"].first
+    assert hotspot.key?("lat")
+    assert hotspot.key?("lng")
+    assert hotspot.key?("count")
+    assert hotspot.key?("intensity")
+    assert hotspot.key?("radiusMeters")
+  end
+
+  test "outside_areas: inactive GeoPoints do not cause exclusion" do
+    @point_a.update!(active: false)
+    @point_b.update!(active: false)
+
+    AnalyticsEvent.create!(
+      geo_project: @project, geo_point: @point_a,
+      event_type: "radius_enter", session_id: "inside-inactive",
+      event_date: Date.today, latitude: -34.0, longitude: -58.0
+    )
+
+    get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header
+    assert_response :ok
+
+    assert_equal 1, response.parsed_body["data"]["meta"]["outsidePoints"],
+      "event inside an INACTIVE GeoPoint must be included in outside_areas"
+  end
+
+  test "outside_areas: returns 404 for project not in organization" do
+    other_user = User.create!(email: "other2_#{SecureRandom.hex(4)}@example.com",
+                               password: "pw", role: "user", status: "active")
+    other_org  = Organization.create!(name: "Other Org2 #{SecureRandom.hex(4)}")
+    other_proj = GeoProject.create!(title: "Other", status: "active",
+                                     user: other_user, organization: other_org)
+    get "/api/v1/projects/#{other_proj.id}/analytics/outside_areas", headers: auth_header
+    assert_response :not_found
+  end
 end

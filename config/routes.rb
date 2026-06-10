@@ -25,7 +25,8 @@ Rails.application.routes.draw do
           get :analytics,                  to: "analytics#summary"
           get "analytics/locations",       to: "analytics#locations",    as: :analytics_locations
           get "analytics/distribution",    to: "analytics#distribution", as: :analytics_distribution
-          get "analytics/intensity",       to: "analytics#intensity",    as: :analytics_intensity
+          get "analytics/intensity",       to: "analytics#intensity",     as: :analytics_intensity
+          get "analytics/outside_areas",   to: "analytics#outside_areas", as: :analytics_outside_areas
         end
       end
 
