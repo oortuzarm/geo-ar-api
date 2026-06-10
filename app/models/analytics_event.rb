@@ -28,7 +28,12 @@ class AnalyticsEvent < ApplicationRecord
     smart_proxy_page_visible
   ].freeze
 
-  EVENT_TYPES = (PUBLIC_EVENT_TYPES + API_EVENT_TYPES + SMART_LINK_EVENT_TYPES + SMART_PROXY_EVENT_TYPES).freeze
+  # Project-level location ping — records presence at project scope without
+  # requiring a specific GeoPoint.  geo_point_id is nil for these events.
+  PROJECT_EVENT_TYPES = %w[project_location].freeze
+
+  EVENT_TYPES = (PUBLIC_EVENT_TYPES + API_EVENT_TYPES + SMART_LINK_EVENT_TYPES +
+                 SMART_PROXY_EVENT_TYPES + PROJECT_EVENT_TYPES).freeze
 
   # Subset writable through POST /api/analytics_events (public endpoint).
   # Smart Link and Smart Proxy types are excluded — they use dedicated endpoints.

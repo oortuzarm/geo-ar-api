@@ -50,6 +50,7 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   end
 
   teardown do
+    ProjectLiveVisit.delete_all
     GeoPointLiveVisit.delete_all
     AnalyticsEvent.delete_all
     GeoPoint.delete_all
@@ -82,9 +83,7 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   # ── Business rules ────────────────────────────────────────────────────────────
 
   test "visit inside active GeoPoint counts in inside" do
-    # Coords at @active_point centre → GeoEngine.inside_boundary? true
-    create_live_visit(@active_point, "session-inside-active",
-                      lat: INSIDE_LAT, lng: INSIDE_LNG, inside_radius: true)
+    create_project_live_visit("session-inside-active", lat: INSIDE_LAT, lng: INSIDE_LNG)
 
     get "/api/geo_projects/#{@project.id}/live_visits", as: :json
     assert_response :ok
@@ -95,9 +94,7 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "visit outside all active GeoPoints counts in outside" do
-    # Coords far from every geo_point → GeoEngine.inside_boundary? false for all
-    create_live_visit(@active_point, "session-outside",
-                      lat: OUTSIDE_LAT, lng: OUTSIDE_LNG, inside_radius: false)
+    create_project_live_visit("session-outside", lat: OUTSIDE_LAT, lng: OUTSIDE_LNG)
 
     get "/api/geo_projects/#{@project.id}/live_visits", as: :json
     assert_response :ok
@@ -108,12 +105,11 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "visit inside inactive GeoPoint counts in outside" do
-    # Coords at @inactive_point centre; that point is not active, so
-    # GeoEngine.inside_boundary? is never called for it.
-    # @active_point is ~780 km away → false → session counts as outside.
-    create_live_visit(@inactive_point, "session-inside-inactive",
-                      lat: @inactive_point.latitude, lng: @inactive_point.longitude,
-                      inside_radius: true)
+    # @inactive_point centre is ~780 km from @active_point (50 m radius) →
+    # GeoEngine.inside_boundary? returns false for all active points → outside.
+    create_project_live_visit("session-inside-inactive",
+                              lat: @inactive_point.latitude,
+                              lng: @inactive_point.longitude)
 
     get "/api/geo_projects/#{@project.id}/live_visits", as: :json
     assert_response :ok
@@ -125,13 +121,11 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
 
   test "total equals inside plus outside" do
     # 1 inside active, 1 outside all, 1 inside inactive → 1 inside, 2 outside
-    create_live_visit(@active_point,   "session-1",
-                      lat: INSIDE_LAT, lng: INSIDE_LNG, inside_radius: true)
-    create_live_visit(@active_point,   "session-2",
-                      lat: OUTSIDE_LAT, lng: OUTSIDE_LNG, inside_radius: false)
-    create_live_visit(@inactive_point, "session-3",
-                      lat: @inactive_point.latitude, lng: @inactive_point.longitude,
-                      inside_radius: true)
+    create_project_live_visit("session-1", lat: INSIDE_LAT, lng: INSIDE_LNG)
+    create_project_live_visit("session-2", lat: OUTSIDE_LAT, lng: OUTSIDE_LNG)
+    create_project_live_visit("session-3",
+                              lat: @inactive_point.latitude,
+                              lng: @inactive_point.longitude)
 
     get "/api/geo_projects/#{@project.id}/live_visits", as: :json
     assert_response :ok
@@ -145,8 +139,11 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
                  "total must equal inside + outside"
   end
 
-  test "session active in two overlapping geo_points is counted once in inside" do
-    second_active = GeoPoint.create!(
+  # ProjectLiveVisit has a unique index on (project, session), so each session
+  # has exactly one row.  A session whose coords fall inside two overlapping
+  # active GeoPoints must still count as one person — verified here.
+  test "session inside two overlapping geo_points is counted once in inside" do
+    GeoPoint.create!(
       geo_project:       @project,
       name:              "Second Active Zone",
       latitude:          INSIDE_LAT,
@@ -156,57 +153,45 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
       active:            true
     )
 
-    # Same session_id, two rows — both at the shared centre coordinate.
-    # Deduplication by last_seen_at picks one; either way the coords are inside
-    # both active points, but the session should count as one person.
-    create_live_visit(@active_point, "session-overlap",
-                      lat: INSIDE_LAT, lng: INSIDE_LNG, inside_radius: true,
-                      last_seen_at: 20.seconds.ago)
-    create_live_visit(second_active, "session-overlap",
-                      lat: INSIDE_LAT, lng: INSIDE_LNG, inside_radius: true,
-                      last_seen_at: 10.seconds.ago)
+    create_project_live_visit("session-overlap", lat: INSIDE_LAT, lng: INSIDE_LNG)
 
     get "/api/geo_projects/#{@project.id}/live_visits", as: :json
     assert_response :ok
     body = response.parsed_body
 
-    assert_equal 1, body["liveVisitsInsideAreas"],  "overlapping session counted once"
+    assert_equal 1, body["liveVisitsInsideAreas"], "overlapping session counted once"
     assert_equal 0, body["liveVisitsOutsideAreas"]
     assert_equal 1, body["liveVisitsTotal"]
   end
 
   # ── Cross-geo_point boundary check ───────────────────────────────────────────
   #
-  # Regression: heartbeat sent to geo_point A, but the session's coordinates
-  # physically fall inside geo_point B's boundary.  The old implementation
-  # used inside_radius (false for A) and classified this as "outside".
-  # The new implementation runs GeoEngine.inside_boundary? against ALL active
-  # geo_points, so the session is correctly classified as "inside".
+  # Coordinates fall inside geo_point B's boundary but outside geo_point A's
+  # (A has 50 m radius, B has 50 km radius centred ~9 km away).
+  # three_way_live_counts must check ALL active points — coords inside B must
+  # classify as "inside" regardless of A.
 
-  test "heartbeat sent to A but coords inside B is counted as inside" do
-    # B has a large radius (50 km) so that INSIDE_LAT/LNG clearly falls within it.
-    point_b = GeoPoint.create!(
+  test "coords inside B but outside A are classified as inside" do
+    GeoPoint.create!(
       geo_project:       @project,
       name:              "B Zone",
       latitude:          INSIDE_LAT,
       longitude:         INSIDE_LNG + 0.1,   # ~9 km east of A
-      activation_radius: 50_000,             # 50 km — coords are well inside
+      activation_radius: 50_000,             # 50 km — INSIDE_LAT/LNG is well inside
       order:             2,
       active:            true
     )
 
-    # Heartbeat sent to A; inside_radius=false because coords are at INSIDE_LAT/LNG
-    # which is ~9 km from B's centre — still within B's 50 km radius.
-    # @active_point A has radius 50 m, so the same coords are outside A.
-    create_live_visit(@active_point, "session-cross-boundary",
-                      lat: INSIDE_LAT, lng: INSIDE_LNG, inside_radius: false)
+    # Coords at INSIDE_LAT/LNG: outside A's 50 m radius, inside B's 50 km radius.
+    create_project_live_visit("session-cross-boundary",
+                              lat: INSIDE_LAT, lng: INSIDE_LNG)
 
     get "/api/geo_projects/#{@project.id}/live_visits", as: :json
     assert_response :ok
     body = response.parsed_body
 
     assert_equal 1, body["liveVisitsInsideAreas"],
-      "session inside B's boundary must count as inside even if heartbeat was sent to A"
+      "session inside B's boundary must count as inside"
     assert_equal 0, body["liveVisitsOutsideAreas"]
     assert_equal 1, body["liveVisitsTotal"]
   end
@@ -337,15 +322,13 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
     )
   end
 
-  def create_live_visit(point, session_id, lat:, lng:, inside_radius:, last_seen_at: 10.seconds.ago)
-    GeoPointLiveVisit.create!(
-      geo_project:   @project,
-      geo_point:     point,
-      session_id:    session_id,
-      lat:           lat,
-      lng:           lng,
-      inside_radius: inside_radius,
-      last_seen_at:  last_seen_at
+  def create_project_live_visit(session_id, lat:, lng:, last_seen_at: 10.seconds.ago)
+    ProjectLiveVisit.create!(
+      geo_project:  @project,
+      session_id:   session_id,
+      lat:          lat,
+      lng:          lng,
+      last_seen_at: last_seen_at
     )
   end
 end

@@ -64,7 +64,9 @@ Rails.application.routes.draw do
         end
       end
       # Standalone heartbeat — not nested under geo_projects (no project context needed).
-      post "geo_points/:id/live_visit", to: "live_visits#create"
+      post "geo_points/:id/live_visit",      to: "live_visits#create"
+      # Project-level location ping — captures GPS regardless of active area membership.
+      post "geo_projects/:id/live_location", to: "project_live_locations#create"
       get "settings", to: "settings#index"
 
       # Smart Links public endpoints — namespaced by organization slug

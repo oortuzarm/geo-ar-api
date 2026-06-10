@@ -77,26 +77,19 @@ module Api
     def three_way_live_counts
       active_points = @project.geo_points.where(active: true).to_a
 
-      # Fetch (session_id, lat, lng, last_seen_at) for every active row with
-      # valid, non-zero coordinates — same filter as ActivityOutsideAreasService.
-      rows = GeoPointLiveVisit
+      # ProjectLiveVisit has a unique index on (geo_project_id, session_id), so
+      # each row is already the latest position for that session — no dedup needed.
+      sessions = ProjectLiveVisit
         .where(geo_project_id: @project.id)
         .active_now
         .where.not(lat: nil, lng: nil)
         .where("NOT (lat = 0 AND lng = 0)")
-        .pluck(:session_id, :lat, :lng, :last_seen_at)
+        .pluck(:lat, :lng)
 
-      # Keep only the most recent position per unique session.
-      latest_per_session = rows
-        .group_by { |sid, *| sid }
-        .transform_values { |session_rows| session_rows.max_by { |*_, seen_at| seen_at } }
-        .values
-
-      live_inside = latest_per_session.count { |_, lat, lng, _|
+      live_inside  = sessions.count { |lat, lng|
         active_points.any? { |point| GeoEngine.inside_boundary?(point, lat, lng) }
       }
-
-      live_total   = latest_per_session.size
+      live_total   = sessions.size
       live_outside = live_total - live_inside
 
       [ live_inside, live_outside, live_total ]

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_08_000004) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_10_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -36,6 +36,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_08_000004) do
     t.uuid "smart_proxy_id"
     t.index ["api_credential_id"], name: "index_analytics_events_on_api_credential_id"
     t.index ["geo_project_id", "geo_point_id", "event_type", "session_id", "event_date"], name: "idx_analytics_events_radius_enter_uniqueness", unique: true, where: "((event_type)::text = 'radius_enter'::text)"
+    t.index ["geo_project_id", "session_id", "event_date"], name: "idx_analytics_events_project_location_uniqueness", unique: true, where: "((event_type)::text = 'project_location'::text)"
     t.index ["geo_project_id"], name: "index_analytics_events_on_geo_project_id"
     t.index ["smart_proxy_id"], name: "index_analytics_events_on_smart_proxy_id"
     t.index ["source"], name: "index_analytics_events_on_source"
@@ -349,6 +350,19 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_08_000004) do
     t.index ["is_visible"], name: "index_plans_on_is_visible"
     t.index ["slug"], name: "index_plans_on_slug", unique: true
     t.index ["sort_order"], name: "index_plans_on_sort_order"
+  end
+
+  create_table "project_live_visits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "geo_project_id", null: false
+    t.string "session_id", null: false
+    t.float "lat", null: false
+    t.float "lng", null: false
+    t.float "accuracy"
+    t.datetime "last_seen_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geo_project_id", "last_seen_at"], name: "idx_project_live_visits_active"
+    t.index ["geo_project_id", "session_id"], name: "index_project_live_visits_on_project_and_session", unique: true
   end
 
   create_table "site_configs", force: :cascade do |t|

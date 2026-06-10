@@ -48,7 +48,7 @@ module Api
 
       # Live GPS positions from sessions active in the last ACTIVE_WINDOW.
       def live_coordinates
-        GeoPointLiveVisit
+        ProjectLiveVisit
           .where(geo_project_id: @project.id)
           .active_now
           .where.not(lat: nil, lng: nil)
