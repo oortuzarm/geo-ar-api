@@ -10,13 +10,13 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_04_000007) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_08_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
 
   create_table "analytics_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.uuid "geo_project_id", null: false
+    t.uuid "geo_project_id"
     t.uuid "geo_point_id"
     t.string "event_type", null: false
     t.string "session_id", null: false
@@ -33,9 +33,11 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000007) do
     t.string "user_ref"
     t.jsonb "context_metadata"
     t.string "failure_reason"
+    t.uuid "smart_proxy_id"
     t.index ["api_credential_id"], name: "index_analytics_events_on_api_credential_id"
     t.index ["geo_project_id", "geo_point_id", "event_type", "session_id", "event_date"], name: "idx_analytics_events_radius_enter_uniqueness", unique: true, where: "((event_type)::text = 'radius_enter'::text)"
     t.index ["geo_project_id"], name: "index_analytics_events_on_geo_project_id"
+    t.index ["smart_proxy_id"], name: "index_analytics_events_on_smart_proxy_id"
     t.index ["source"], name: "index_analytics_events_on_source"
   end
 
@@ -385,6 +387,46 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000007) do
     t.index ["user_id"], name: "index_smart_links_on_user_id"
   end
 
+  create_table "smart_proxies", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "organization_id", null: false
+    t.uuid "user_id", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.string "destination_url", null: false
+    t.string "proxy_status", default: "unknown", null: false
+    t.boolean "active", default: true, null: false
+    t.string "custom_domain"
+    t.string "domain_status", default: "pending"
+    t.string "ssl_status", default: "pending"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "compatibility_status", default: "pending", null: false
+    t.integer "compatibility_score", default: 0, null: false
+    t.jsonb "compatibility_report", default: {}
+    t.datetime "compatibility_checked_at"
+    t.index ["active"], name: "index_smart_proxies_on_active"
+    t.index ["compatibility_status"], name: "index_smart_proxies_on_compatibility_status"
+    t.index ["custom_domain"], name: "index_smart_proxies_on_custom_domain", unique: true, where: "(custom_domain IS NOT NULL)"
+    t.index ["organization_id", "slug"], name: "index_smart_proxies_on_organization_id_and_slug", unique: true
+    t.index ["organization_id"], name: "index_smart_proxies_on_organization_id"
+    t.index ["proxy_status"], name: "index_smart_proxies_on_proxy_status"
+    t.index ["user_id"], name: "index_smart_proxies_on_user_id"
+  end
+
+  create_table "smart_proxy_live_visits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "smart_proxy_id", null: false
+    t.string "session_id", null: false
+    t.float "lat", null: false
+    t.float "lng", null: false
+    t.float "accuracy"
+    t.datetime "last_seen_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["last_seen_at"], name: "index_smart_proxy_live_visits_on_last_seen_at"
+    t.index ["smart_proxy_id", "session_id"], name: "index_smart_proxy_live_visits_on_proxy_and_session", unique: true
+    t.index ["smart_proxy_id"], name: "index_smart_proxy_live_visits_on_smart_proxy_id"
+  end
+
   create_table "temporary_previews", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "token", null: false
     t.jsonb "payload", default: {}, null: false
@@ -429,6 +471,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000007) do
   end
 
   add_foreign_key "analytics_events", "api_credentials"
+  add_foreign_key "analytics_events", "smart_proxies", on_delete: :nullify
   add_foreign_key "api_credentials", "organizations"
   add_foreign_key "api_credentials", "users", column: "created_by_user_id"
   add_foreign_key "api_credentials", "users", column: "revoked_by_user_id"
@@ -448,6 +491,9 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_04_000007) do
   add_foreign_key "smart_links", "geo_projects", column: "project_id"
   add_foreign_key "smart_links", "organizations"
   add_foreign_key "smart_links", "users"
+  add_foreign_key "smart_proxies", "organizations"
+  add_foreign_key "smart_proxies", "users"
+  add_foreign_key "smart_proxy_live_visits", "smart_proxies"
   add_foreign_key "users", "onboarding_categories", on_delete: :nullify
   add_foreign_key "users", "onboarding_options", column: "onboarding_industry_id", on_delete: :nullify
   add_foreign_key "users", "onboarding_options", column: "onboarding_objective_id", on_delete: :nullify
