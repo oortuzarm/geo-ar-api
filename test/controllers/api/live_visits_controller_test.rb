@@ -51,6 +51,7 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
 
   teardown do
     GeoPointLiveVisit.delete_all
+    AnalyticsEvent.delete_all
     GeoPoint.delete_all
     GeoProject.delete_all
     Organization.where(id: @org.id).destroy_all
@@ -210,7 +211,131 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, body["liveVisitsTotal"]
   end
 
+  # ── Period metrics ────────────────────────────────────────────────────────────
+
+  test "period metrics fields are present in response" do
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
+    assert_response :ok
+    body = response.parsed_body
+    assert body.key?("periodPeopleInsideAreas"),  "missing periodPeopleInsideAreas"
+    assert body.key?("periodPeopleOutsideAreas"), "missing periodPeopleOutsideAreas"
+    assert body.key?("periodPeopleTotal"),        "missing periodPeopleTotal"
+  end
+
+  test "period without activity returns 0 for all three period metrics" do
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal 0, body["periodPeopleInsideAreas"]
+    assert_equal 0, body["periodPeopleOutsideAreas"]
+    assert_equal 0, body["periodPeopleTotal"]
+  end
+
+  test "unique person inside active area counts in period inside" do
+    create_analytics_event("p-inside", INSIDE_LAT, INSIDE_LNG, Date.today)
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal 1, body["periodPeopleInsideAreas"]
+    assert_equal 0, body["periodPeopleOutsideAreas"]
+    assert_equal 1, body["periodPeopleTotal"]
+  end
+
+  test "unique person outside active areas counts in period outside" do
+    create_analytics_event("p-outside", OUTSIDE_LAT, OUTSIDE_LNG, Date.today)
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal 0, body["periodPeopleInsideAreas"]
+    assert_equal 1, body["periodPeopleOutsideAreas"]
+    assert_equal 1, body["periodPeopleTotal"]
+  end
+
+  # Person A: events inside AND outside.  Person B: only outside.
+  # Expected: inside=1, outside=2, total=2 (union, not sum).
+  test "person present in both groups counted in each, total is union not sum" do
+    create_analytics_event("p-both", INSIDE_LAT,  INSIDE_LNG,  Date.today, geo_point: @active_point)
+    create_analytics_event("p-both", OUTSIDE_LAT, OUTSIDE_LNG, Date.today, geo_point: @inactive_point)
+    create_analytics_event("p-only-outside", OUTSIDE_LAT, OUTSIDE_LNG, Date.today, geo_point: @inactive_point)
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
+    assert_response :ok
+    body = response.parsed_body
+
+    assert_equal 1, body["periodPeopleInsideAreas"]
+    assert_equal 2, body["periodPeopleOutsideAreas"]
+    assert_equal 2, body["periodPeopleTotal"],
+      "total must be the union — p-both counted once despite being in both groups"
+  end
+
+  test "inactive area does not count as active area for period classification" do
+    # Coords at @inactive_point centre — ~780 km from @active_point (50 m radius)
+    # → GeoEngine.inside_boundary? returns false for all ACTIVE points
+    create_analytics_event("p-inactive-area",
+                           @inactive_point.latitude, @inactive_point.longitude,
+                           Date.today, geo_point: @inactive_point)
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal 0, body["periodPeopleInsideAreas"],
+      "inactive area must not count as an active area"
+    assert_equal 1, body["periodPeopleOutsideAreas"]
+    assert_equal 1, body["periodPeopleTotal"]
+  end
+
+  test "date range filter includes only events within range" do
+    yesterday = Date.today - 1
+    today     = Date.today
+
+    create_analytics_event("p-yesterday", INSIDE_LAT, INSIDE_LNG, yesterday)
+    create_analytics_event("p-today",     INSIDE_LAT, INSIDE_LNG, today)
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{yesterday}&to=#{yesterday}", as: :json
+    assert_equal 1, response.parsed_body["periodPeopleInsideAreas"],
+      "yesterday-only range must count only the event from yesterday"
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{today}&to=#{today}", as: :json
+    assert_equal 1, response.parsed_body["periodPeopleInsideAreas"],
+      "today-only range must count only the event from today"
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{yesterday}&to=#{today}", as: :json
+    assert_equal 2, response.parsed_body["periodPeopleInsideAreas"],
+      "full range must count both events"
+  end
+
+  # When sessions have no overlap (each in exactly one group),
+  # total must equal inside + outside — consistent with the outside-areas logic.
+  test "period metrics are consistent with outside areas spatial logic" do
+    create_analytics_event("p-cons-inside",  INSIDE_LAT,  INSIDE_LNG,  Date.today)
+    create_analytics_event("p-cons-outside", OUTSIDE_LAT, OUTSIDE_LNG, Date.today)
+
+    get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
+    assert_response :ok
+    body = response.parsed_body
+
+    assert_equal 1, body["periodPeopleInsideAreas"]
+    assert_equal 1, body["periodPeopleOutsideAreas"]
+    assert_equal body["periodPeopleInsideAreas"] + body["periodPeopleOutsideAreas"],
+                 body["periodPeopleTotal"],
+                 "when sets are disjoint, total equals sum — consistent with spatial classification"
+  end
+
   private
+
+  def create_analytics_event(session_id, lat, lng, date, geo_point: nil)
+    AnalyticsEvent.create!(
+      geo_project: @project,
+      geo_point:   geo_point || @active_point,
+      event_type:  "radius_enter",
+      session_id:  session_id,
+      event_date:  date,
+      latitude:    lat,
+      longitude:   lng
+    )
+  end
 
   def create_live_visit(point, session_id, lat:, lng:, inside_radius:, last_seen_at: 10.seconds.ago)
     GeoPointLiveVisit.create!(
