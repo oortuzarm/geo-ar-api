@@ -43,7 +43,8 @@ Rails.application.routes.draw do
   namespace :api do
     # ── Studio analytics (session auth) ─────────────────────────────────────
     namespace :analytics do
-      get :hotspots, to: "hotspots#index"
+      get :hotspots,      to: "hotspots#index"
+      get :outside_areas, to: "outside_areas#index"
     end
 
     post   "auth/register",        to: "auth#register"
