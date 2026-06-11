@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_10_000002) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_10_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -129,6 +129,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_10_000002) do
     t.string "community_status", default: "pending", null: false
     t.uuid "organization_id", null: false
     t.string "project_logo_url"
+    t.float "project_logo_zoom"
     t.index ["community_enabled", "community_status"], name: "index_geo_projects_on_community"
     t.index ["organization_id"], name: "index_geo_projects_on_organization_id"
     t.index ["status"], name: "index_geo_projects_on_status"
