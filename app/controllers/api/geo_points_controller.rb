@@ -69,6 +69,7 @@ module Api
         :latitude, :longitude, :activation_radius, :activation_mode,
         :image, :description, :instructions, :active, :order, :button_text,
         :requires_dwell_time, :dwell_time_seconds,
+        :point_logo_url, :point_logo_zoom, :point_logo_position_x, :point_logo_position_y,
         content_data:        {},
         activation_polygon:  {},
         images: %i[id url is_cover is_Cover isCover position],

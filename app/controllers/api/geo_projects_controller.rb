@@ -125,6 +125,10 @@ module Api
               "availability"         => pt.fetch("availability", {}),
               "activation_mode"      => pt.fetch("activation_mode", "radius").presence || "radius",
               "activation_polygon"   => pt.fetch("activation_polygon", nil),
+              "point_logo_url"       => pt["point_logo_url"],
+              "point_logo_zoom"      => pt["point_logo_zoom"],
+              "point_logo_position_x" => pt["point_logo_position_x"],
+              "point_logo_position_y" => pt["point_logo_position_y"],
               "created_at"           => now,
               "updated_at"           => now
             }
@@ -135,6 +139,7 @@ module Api
             latitude longitude activation_radius activation_mode activation_polygon
             description instructions button_text active order
             availability images updated_at
+            point_logo_url point_logo_zoom point_logo_position_x point_logo_position_y
           ]
 
           pts_with_image    = pts.select { |p| p.key?("image") }
@@ -208,6 +213,7 @@ module Api
           :id, :name, :lookiar_url, :content_type, :destination_category,
           :latitude, :longitude, :activation_radius, :activation_mode,
           :image, :description, :instructions, :active, :order, :button_text,
+          :point_logo_url, :point_logo_zoom, :point_logo_position_x, :point_logo_position_y,
           content_data:       {},
           activation_polygon: {},
           images: [ :id, :url, :is_cover, :isCover, :position ],

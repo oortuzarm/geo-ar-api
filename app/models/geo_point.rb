@@ -63,6 +63,10 @@ class GeoPoint < ApplicationRecord
       dwellTimeSeconds:    dwell_time_seconds,
       activationMode:      activation_mode,
       activationPolygon:   activation_polygon,
+      pointLogoUrl:        point_logo_url,
+      pointLogoZoom:       point_logo_zoom,
+      pointLogoPositionX:  point_logo_position_x,
+      pointLogoPositionY:  point_logo_position_y,
       createdAt:           created_at.iso8601(3)
     }
   end

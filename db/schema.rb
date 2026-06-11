@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_10_000004) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_10_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -105,6 +105,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_10_000004) do
     t.string "activation_mode", default: "radius", null: false
     t.jsonb "activation_polygon"
     t.string "destination_category"
+    t.string "point_logo_url"
+    t.float "point_logo_zoom"
+    t.float "point_logo_position_x"
+    t.float "point_logo_position_y"
     t.index ["activation_mode"], name: "index_geo_points_on_activation_mode"
     t.index ["geo_project_id", "order"], name: "index_geo_points_on_geo_project_id_and_order"
     t.index ["geo_project_id"], name: "index_geo_points_on_geo_project_id"
