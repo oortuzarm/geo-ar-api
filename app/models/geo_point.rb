@@ -67,6 +67,8 @@ class GeoPoint < ApplicationRecord
       pointLogoZoom:       point_logo_zoom,
       pointLogoPositionX:  point_logo_position_x,
       pointLogoPositionY:  point_logo_position_y,
+      pointVideoUrl:       point_video_url,
+      pointVideoType:      point_video_type,
       createdAt:           created_at.iso8601(3)
     }
   end

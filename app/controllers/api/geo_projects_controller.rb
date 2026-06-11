@@ -125,10 +125,12 @@ module Api
               "availability"         => pt.fetch("availability", {}),
               "activation_mode"      => pt.fetch("activation_mode", "radius").presence || "radius",
               "activation_polygon"   => pt.fetch("activation_polygon", nil),
-              "point_logo_url"       => pt["point_logo_url"],
-              "point_logo_zoom"      => pt["point_logo_zoom"],
+              "point_logo_url"        => pt["point_logo_url"],
+              "point_logo_zoom"       => pt["point_logo_zoom"],
               "point_logo_position_x" => pt["point_logo_position_x"],
               "point_logo_position_y" => pt["point_logo_position_y"],
+              "point_video_url"       => pt["point_video_url"],
+              "point_video_type"      => pt["point_video_type"],
               "created_at"           => now,
               "updated_at"           => now
             }
@@ -140,6 +142,7 @@ module Api
             description instructions button_text active order
             availability images updated_at
             point_logo_url point_logo_zoom point_logo_position_x point_logo_position_y
+            point_video_url point_video_type
           ]
 
           pts_with_image    = pts.select { |p| p.key?("image") }
@@ -214,6 +217,7 @@ module Api
           :latitude, :longitude, :activation_radius, :activation_mode,
           :image, :description, :instructions, :active, :order, :button_text,
           :point_logo_url, :point_logo_zoom, :point_logo_position_x, :point_logo_position_y,
+          :point_video_url, :point_video_type,
           content_data:       {},
           activation_polygon: {},
           images: [ :id, :url, :is_cover, :isCover, :position ],
