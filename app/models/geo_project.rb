@@ -46,7 +46,9 @@ class GeoProject < ApplicationRecord
       publicInitialCenterLng:  public_initial_center_lng&.to_f,
       publicInitialZoom:       public_initial_zoom,
       projectLogoUrl:          project_logo_url,
-      projectLogoZoom:         project_logo_zoom
+      projectLogoZoom:         project_logo_zoom,
+      projectLogoPositionX:    project_logo_position_x,
+      projectLogoPositionY:    project_logo_position_y
     }
   end
 
