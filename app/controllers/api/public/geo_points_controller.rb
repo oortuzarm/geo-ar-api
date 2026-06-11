@@ -6,8 +6,30 @@ module Api
 
       # GET /api/public/geo_projects/:geo_project_id/geo_points
       def index
-        points = @project.geo_points.where(active: true).order(:order)
+        points = @project.geo_points
+                         .where(active: true)
+                         .includes(:geo_point_collections)
+                         .order(:order)
         render json: points.map(&:as_public_api_json)
+      end
+
+      # GET /api/public/geo_projects/:geo_project_id/geo_points/session_visited_points?session_id=...
+      # Returns the IDs of all active points in this project that the given session has visited
+      # (has a radius_enter analytics event for).
+      def session_visited_points
+        session_id = params[:session_id].presence
+        unless session_id
+          return render json: { visited_point_ids: [] }
+        end
+
+        point_ids = @project.geo_points.where(active: true).pluck(:id)
+        visited = AnalyticsEvent
+          .where(session_id: session_id, geo_point_id: point_ids, event_type: "radius_enter")
+          .distinct
+          .pluck(:geo_point_id)
+          .map(&:to_s)
+
+        render json: { visited_point_ids: visited }
       end
 
       # POST /api/public/geo_projects/:geo_project_id/geo_points/:id/access
@@ -63,6 +85,23 @@ module Api
             return render_deny("Se requiere un mínimo de #{minimum} personas en el área para acceder")
           end
           Rails.logger.info "[ACCESS] live_visits ok current=#{current_count} minimum=#{minimum}"
+        end
+
+        # ── Collection check ────────────────────────────────────────────────────
+        # @point.geo_point_collections is already preloaded via set_point.
+        if @point.geo_point_collections.any?
+          required_ids = @point.geo_point_collections.map { |c| c.required_geo_point_id.to_s }
+          visited_ids  = AnalyticsEvent
+            .where(session_id: session_id, geo_point_id: required_ids, event_type: "radius_enter")
+            .distinct
+            .pluck(:geo_point_id)
+            .map(&:to_s)
+          missing = required_ids - visited_ids
+          if missing.any?
+            Rails.logger.info "[ACCESS] DENY reason=collection missing=#{missing}"
+            return render_deny("Debes visitar todas las ubicaciones requeridas antes de acceder")
+          end
+          Rails.logger.info "[ACCESS] collection ok required=#{required_ids.size} visited=#{visited_ids.size}"
         end
 
         if GeoEngine.quota_active?(@point)
@@ -148,7 +187,9 @@ module Api
       end
 
       def set_point
-        @point = @project.geo_points.find_by(id: params[:id], active: true)
+        @point = @project.geo_points
+                         .includes(:geo_point_collections)
+                         .find_by(id: params[:id], active: true)
         unless @point
           render json: { message: "Punto no encontrado" }, status: :not_found
         end

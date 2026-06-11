@@ -57,6 +57,9 @@ Rails.application.routes.draw do
     namespace :public do
       resources :geo_projects, only: %i[show] do
         resources :geo_points, only: %i[index] do
+          collection do
+            get :session_visited_points
+          end
           member do
             post :access
             post :complete_dwell

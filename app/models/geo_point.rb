@@ -6,6 +6,8 @@ class GeoPoint < ApplicationRecord
   belongs_to :geo_project, inverse_of: :geo_points
   has_many   :analytics_events,      dependent: :destroy
   has_many   :geo_point_live_visits, dependent: :destroy
+  has_many   :geo_point_collections, dependent: :destroy
+  has_many   :required_geo_points, through: :geo_point_collections
 
   validates :latitude,           presence: true, numericality: { greater_than_or_equal_to: -90,  less_than_or_equal_to: 90 }
   validates :longitude,          presence: true, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }
@@ -69,6 +71,7 @@ class GeoPoint < ApplicationRecord
       pointLogoPositionY:  point_logo_position_y,
       pointVideoUrl:       point_video_url,
       pointVideoType:      point_video_type,
+      requiredPointIds:    geo_point_collections.map { |c| c.required_geo_point_id.to_s },
       createdAt:           created_at.iso8601(3)
     }
   end

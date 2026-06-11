@@ -167,6 +167,29 @@ module Api
 
         t5 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         Rails.logger.info "[SAVE_PERF] upsert_ms=#{ms(t4, t5)}"
+
+        # 4. Sync collection requirements per point.
+        # Only processes points that explicitly send required_point_ids (key present),
+        # so old clients that omit the key never accidentally clear existing data.
+        pts.each do |pt|
+          point_id = pt["id"].presence
+          next unless point_id
+          next unless pt.key?("required_point_ids")
+
+          raw_required = Array(pt["required_point_ids"])
+                           .filter_map { |r| r.to_s.presence }
+                           .uniq
+          GeoPointCollection.where(geo_point_id: point_id).delete_all
+          valid = raw_required.reject { |rid| rid == point_id }
+          if valid.any?
+            GeoPointCollection.insert_all(
+              valid.map { |rid|
+                { geo_point_id: point_id, required_geo_point_id: rid,
+                  created_at: now, updated_at: now }
+              }
+            )
+          end
+        end
       end
 
       t6 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -218,6 +241,7 @@ module Api
           :image, :description, :instructions, :active, :order, :button_text,
           :point_logo_url, :point_logo_zoom, :point_logo_position_x, :point_logo_position_y,
           :point_video_url, :point_video_type,
+          required_point_ids: [],
           content_data:       {},
           activation_polygon: {},
           images: [ :id, :url, :is_cover, :isCover, :position ],
