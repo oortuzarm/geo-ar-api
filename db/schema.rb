@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_10_000006) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_11_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -61,6 +61,16 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_10_000006) do
     t.index ["key_public"], name: "index_api_credentials_on_key_public", unique: true
     t.index ["organization_id"], name: "index_api_credentials_on_organization_id"
     t.index ["status"], name: "index_api_credentials_on_status"
+  end
+
+  create_table "geo_point_collections", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "geo_point_id", null: false
+    t.uuid "required_geo_point_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geo_point_id", "required_geo_point_id"], name: "idx_geo_point_collections_unique", unique: true
+    t.index ["geo_point_id"], name: "index_geo_point_collections_on_geo_point_id"
+    t.index ["required_geo_point_id"], name: "index_geo_point_collections_on_required_geo_point_id"
   end
 
   create_table "geo_point_live_visits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -499,6 +509,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_10_000006) do
   add_foreign_key "api_credentials", "organizations"
   add_foreign_key "api_credentials", "users", column: "created_by_user_id"
   add_foreign_key "api_credentials", "users", column: "revoked_by_user_id"
+  add_foreign_key "geo_point_collections", "geo_points", column: "required_geo_point_id", on_delete: :cascade
+  add_foreign_key "geo_point_collections", "geo_points", on_delete: :cascade
   add_foreign_key "geo_point_live_visits", "geo_points"
   add_foreign_key "geo_point_live_visits", "geo_projects"
   add_foreign_key "geo_points", "geo_projects"
