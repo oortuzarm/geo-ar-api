@@ -78,6 +78,7 @@ class GeoPoint < ApplicationRecord
       pointVideoType:      point_video_type,
       requiredPointIds:    geo_point_collections.map { |c| c.required_geo_point_id.to_s },
       pointMode:           point_mode || "unlock",
+      socialLinks:         social_links.presence || {},
       createdAt:           created_at.iso8601(3),
       updatedAt:           updated_at.iso8601(3)
     }

@@ -132,6 +132,7 @@ module Api
               "point_video_url"       => pt["point_video_url"],
               "point_video_type"      => pt["point_video_type"],
               "point_mode"           => pt.fetch("point_mode", "unlock").presence || "unlock",
+              "social_links"         => pt.fetch("social_links", {}) || {},
               "created_at"           => now,
               "updated_at"           => now
             }
@@ -143,7 +144,7 @@ module Api
             description instructions button_text active order
             availability images updated_at
             point_logo_url point_logo_zoom point_logo_position_x point_logo_position_y
-            point_video_url point_video_type point_mode
+            point_video_url point_video_type point_mode social_links
           ]
 
           pts_with_image    = pts.select { |p| p.key?("image") }
@@ -243,6 +244,7 @@ module Api
           :point_logo_url, :point_logo_zoom, :point_logo_position_x, :point_logo_position_y,
           :point_video_url, :point_video_type, :point_mode,
           required_point_ids: [],
+          social_links: {},
           content_data:       {},
           activation_polygon: {},
           images: [ :id, :url, :is_cover, :isCover, :position ],
