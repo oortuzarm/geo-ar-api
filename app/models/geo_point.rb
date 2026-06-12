@@ -73,7 +73,8 @@ class GeoPoint < ApplicationRecord
       pointVideoUrl:       point_video_url,
       pointVideoType:      point_video_type,
       requiredPointIds:    geo_point_collections.map { |c| c.required_geo_point_id.to_s },
-      createdAt:           created_at.iso8601(3)
+      createdAt:           created_at.iso8601(3),
+      updatedAt:           updated_at.iso8601(3)
     }
   end
 
