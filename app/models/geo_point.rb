@@ -1,7 +1,8 @@
 class GeoPoint < ApplicationRecord
-  CONTENT_TYPES         = %w[url video audio file].freeze
-  ACTIVATION_MODES      = %w[radius polygon].freeze
+  CONTENT_TYPES          = %w[url video audio file].freeze
+  ACTIVATION_MODES       = %w[radius polygon].freeze
   DESTINATION_CATEGORIES = %w[website whatsapp form reservation ecommerce social map coupon custom].freeze
+  POINT_MODES            = %w[unlock informative].freeze
 
   belongs_to :geo_project, inverse_of: :geo_points
   has_many   :analytics_events,      dependent: :destroy
@@ -14,7 +15,9 @@ class GeoPoint < ApplicationRecord
   validates :longitude,          presence: true, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }
   validates :activation_radius,  numericality: { greater_than: 0, only_integer: true }
   validates :order,              numericality: { greater_than_or_equal_to: 0, only_integer: true }
-  validates :content_type,          inclusion: { in: CONTENT_TYPES }
+  validates :point_mode,            inclusion: { in: POINT_MODES }, allow_nil: true
+  validates :content_type,          inclusion: { in: CONTENT_TYPES },
+                                    unless: -> { point_mode == "informative" }
   validates :activation_mode,       inclusion: { in: ACTIVATION_MODES }
   validates :destination_category,  inclusion: { in: DESTINATION_CATEGORIES },
                                     allow_nil: true, allow_blank: true
@@ -38,8 +41,9 @@ class GeoPoint < ApplicationRecord
   # validation via POST .../geo_points/:id/access.
   # contentType and destinationCategory ARE included so the frontend can
   # show the right icon/button and categorisation label.
+  # Exception: informative points always include content since they have no access restriction.
   def as_public_api_json
-    as_api_json.except(:lookiarUrl, :contentData)
+    point_mode == "informative" ? as_api_json : as_api_json.except(:lookiarUrl, :contentData)
   end
 
   def as_api_json
@@ -73,6 +77,7 @@ class GeoPoint < ApplicationRecord
       pointVideoUrl:       point_video_url,
       pointVideoType:      point_video_type,
       requiredPointIds:    geo_point_collections.map { |c| c.required_geo_point_id.to_s },
+      pointMode:           point_mode || "unlock",
       createdAt:           created_at.iso8601(3),
       updatedAt:           updated_at.iso8601(3)
     }
@@ -115,6 +120,7 @@ class GeoPoint < ApplicationRecord
   private_constant :VALID_URL_REGEX, :CONTENT_DATA_URL_MAX, :FILE_NAME_MAX, :MIME_TYPE_MAX
 
   def content_data_matches_schema
+    return if point_mode == "informative"
     return if content_type.blank?
 
     cd = content_data

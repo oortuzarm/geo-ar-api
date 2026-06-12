@@ -44,6 +44,24 @@ module Api
         Rails.logger.info "[ACCESS] user lat=#{lat} lng=#{lng} mode=#{@point.activation_mode}"
         Rails.logger.info "[ACCESS] radius=#{@point.activation_radius}m availability=#{@point.availability.inspect}"
 
+        # Informative points bypass all access checks — content is always available.
+        if @point.point_mode == "informative"
+          Rails.logger.info "[ACCESS] informative point — bypassing all checks"
+          ct = @point.content_type.presence || "url"
+          cd = @point.content_data.presence || {}
+          case ct
+          when "url"
+            target_url = cd["url"].presence || @point.lookiar_url.presence
+            return render json: { success: true, content_type: "url", url: target_url }
+          when "video", "audio", "file"
+            file_url = cd["file_url"].presence
+            return render json: { success: true, content_type: ct, file_url: file_url,
+                                  file_name: cd["file_name"], mime_type: cd["mime_type"] }
+          else
+            return render json: { success: true, content_type: "info" }
+          end
+        end
+
         dist   = GeoEngine.distance_to(@point, lat, lng)
         within = GeoEngine.inside_boundary?(@point, lat, lng)
 
