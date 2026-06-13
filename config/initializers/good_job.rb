@@ -1,5 +1,5 @@
-GoodJob.configure do |config|
-  config.cron = {
+Rails.application.configure do
+  config.good_job.cron = {
     live_visit_snapshot: {
       cron:        "*/5 * * * *",
       class:       "LiveVisitSnapshotJob",
