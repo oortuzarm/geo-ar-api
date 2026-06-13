@@ -56,11 +56,16 @@ module Api
           .pluck(:lat, :lng)
       end
 
-      # Historical GPS coordinates from analytics events.
+      # Historical GPS coordinates from project_location events only.
+      # project_location is the only event type that captures the user's general
+      # position regardless of whether they are inside or outside a GeoPoint.
+      # Other event types (radius_enter, point_click, dwell_*) are only fired
+      # when the user is already inside a boundary, so their coordinates cannot
+      # represent outside activity and are excluded here.
       # Filters by optional date range via event_date.
       def historical_coordinates
         scope = AnalyticsEvent
-          .where(geo_project_id: @project.id)
+          .where(geo_project_id: @project.id, event_type: "project_location")
           .where.not(latitude: nil, longitude: nil)
           .where(latitude: -90.0..90.0, longitude: -180.0..180.0)
           .where("NOT (latitude = 0 AND longitude = 0)")

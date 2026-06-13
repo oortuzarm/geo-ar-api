@@ -67,21 +67,24 @@ module Api
       end
 
       # One AnalyticsEvent per (session, project, calendar day).
-      # Stores the coordinates of the first ping of the day; classification
-      # (inside / outside) happens at query time via GeoEngine.inside_boundary?.
+      # Coordinates are updated on every ping so the stored position always
+      # reflects the last known location of the session during that day.
+      # Classification (inside / outside) happens at query time via GeoEngine.inside_boundary?.
       def record_daily_event(project, session_id, lat, lng)
-        AnalyticsEvent.find_or_create_by!(
+        event = AnalyticsEvent.find_or_initialize_by(
           geo_project_id: project.id,
           session_id:     session_id,
           event_type:     "project_location",
           event_date:     Date.current
-        ) do |evt|
-          evt.latitude  = lat
-          evt.longitude = lng
-          evt.source    = "public"
-        end
+        )
+        event.latitude = lat
+        event.longitude = lng
+        event.source ||= "public"
+        event.save!
       rescue ActiveRecord::RecordNotUnique
-        # Race condition: another concurrent request already created it — safe to ignore.
+        # Race condition on insert: a concurrent request created the row first.
+        # Retry so the update path runs against the now-existing record.
+        retry
       end
 
       def valid_coordinates?

@@ -99,6 +99,14 @@ module Api
     # date range, using the same geospatial criterion as three_way_live_counts
     # and ActivityOutsideAreasService.
     #
+    # Only project_location events are used as the coordinate source because
+    # they are the only event type that records a user's general position
+    # regardless of zone membership.  Events like radius_enter or point_click
+    # are only fired while already inside a boundary, so including them would
+    # inflate inside_sessions and prevent outside-only sessions from appearing
+    # in outside_sessions.  This also aligns the historical source with
+    # ActivityOutsideAreasService#historical_coordinates.
+    #
     # A session is classified as "inside" if ANY of its coordinates during the
     # period falls inside at least one active GeoPoint boundary.  It is
     # classified as "outside" if ANY of its coordinates falls outside all active
@@ -111,7 +119,7 @@ module Api
       active_points = @project.geo_points.where(active: true).to_a
 
       scope = AnalyticsEvent
-        .where(geo_project_id: @project.id)
+        .where(geo_project_id: @project.id, event_type: "project_location")
         .where.not(latitude: nil, longitude: nil)
         .where(latitude: -90.0..90.0, longitude: -180.0..180.0)
         .where("NOT (latitude = 0 AND longitude = 0)")
