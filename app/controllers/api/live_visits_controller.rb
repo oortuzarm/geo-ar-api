@@ -22,19 +22,28 @@ module Api
         {}
       end
 
+      point_ids = counts_by_point.keys.compact
+
+      # Per-point metrics via bulk queries (1 query each — no N+1).
+      deltas_by_point = point_last_hour_deltas(point_ids, counts_by_point)
+      peaks_by_point  = point_peaks_today(point_ids)
+
       ranked = counts_by_point
         .map { |pid, cnt| { pid: pid, point: points_by_id[pid], count: cnt } }
         .reject { |h| h[:point].nil? }
         .sort_by { |h| -h[:count] }
         .map do |h|
-          pt = h[:point]
+          pt  = h[:point]
+          pid = h[:pid]
           {
-            id:           pt.id,
-            name:         pt.name,
-            lat:          pt.latitude,
-            lng:          pt.longitude,
-            radiusMeters: pt.activation_radius,
-            activeNow:    h[:count]
+            id:                   pt.id,
+            name:                 pt.name,
+            lat:                  pt.latitude,
+            lng:                  pt.longitude,
+            radiusMeters:         pt.activation_radius,
+            activeNow:            h[:count],
+            lastHourDeltaPercent: deltas_by_point[pid],
+            peakToday:            peaks_by_point[pid]
           }
         end
 
@@ -160,6 +169,73 @@ module Api
       Date.parse(val.to_s)
     rescue ArgumentError, TypeError
       nil
+    end
+
+    # Returns { geo_point_id => Integer | nil } for every id in point_ids.
+    # nil = no snapshot found in the ±8-minute window around 1 hour ago.
+    # Uses one query for all points — no N+1.
+    def point_last_hour_deltas(point_ids, active_counts_by_point)
+      return {} if point_ids.empty?
+
+      target_time = 1.hour.ago
+
+      rows = LiveVisitSnapshot
+        .where(geo_project_id: @project.id)
+        .where(geo_point_id: point_ids)
+        .where(sampled_at: (target_time - 8.minutes)..(target_time + 8.minutes))
+        .pluck(:geo_point_id, :sampled_at, :active_count)
+
+      # Most recent snapshot's active_count per point within the window.
+      past_by_point = rows
+        .group_by { |pid, _ts, _cnt| pid }
+        .transform_values { |group| group.max_by { |_pid, ts, _cnt| ts }.last }
+
+      point_ids.each_with_object({}) do |pid, result|
+        past_count = past_by_point[pid]
+        now_count  = active_counts_by_point[pid] || 0
+
+        result[pid] = if past_count.nil?
+          nil
+        elsif past_count > 0
+          ((now_count - past_count) / past_count.to_f * 100).round
+        elsif now_count > 0
+          100
+        else
+          0
+        end
+      end
+    end
+
+    # Returns { geo_point_id => { label: String, count: Integer } } for every id
+    # in point_ids that has snapshots today.  Points with no data are absent from
+    # the hash, so callers get nil when accessing a missing key.
+    # Uses one query for all points — no N+1.
+    def point_peaks_today(point_ids)
+      return {} if point_ids.empty?
+
+      tz          = project_time_zone
+      now         = Time.current.in_time_zone(tz)
+      today_start = now.beginning_of_day
+      today_end   = now.end_of_day
+
+      rows = LiveVisitSnapshot
+        .where(geo_project_id: @project.id)
+        .where(geo_point_id: point_ids)
+        .where(sampled_at: today_start..today_end)
+        .pluck(:geo_point_id, :sampled_at, :active_count)
+
+      rows.group_by { |pid, _ts, _cnt| pid }.transform_values do |group|
+        counts_by_hour = group
+          .group_by { |_pid, ts, _cnt| ts.in_time_zone(tz).beginning_of_hour }
+          .transform_values { |g| g.map { |_pid, _ts, cnt| cnt }.max }
+
+        hour_start, count = counts_by_hour.max_by { |_, cnt| cnt }
+
+        {
+          label: "#{hour_start.strftime('%H:%M')}–#{(hour_start + 1.hour).strftime('%H:%M')}",
+          count: count
+        }
+      end
     end
   end
 end
