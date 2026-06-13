@@ -21,29 +21,32 @@ module LiveVisitsQueryable
 
   private
 
-  # Compares active_now against sessions recorded in the previous hour window.
+  # Compares active_now against the snapshot closest to 1 hour ago.
   #
-  # active_now    — already-computed count (inside_radius + active window).
-  # previous      — sessions with inside_radius=true whose last_seen_at falls in
-  #                 [1.hour.ago, ACTIVE_WINDOW.ago), i.e. the hour before the
-  #                 current active window.  Excluding the active window avoids
-  #                 counting the same sessions in both buckets.
+  # Looks for a project-level snapshot (geo_point_id: nil) within ±8 minutes of
+  # the 1-hour mark.  With 5-minute sampling this window always covers 2-3
+  # candidates; we take the most recent one.
+  #
+  # Returns nil when no suitable snapshot exists (e.g. first hour after deploy).
   #
   # Formula:
-  #   previous > 0               → ((now - previous) / previous.to_f * 100).round
-  #   previous == 0, now > 0     → 100
-  #   both zero                  → 0
+  #   past > 0               → ((now - past) / past.to_f * 100).round
+  #   past == 0, now > 0     → 100
+  #   both zero              → 0
   def last_hour_delta_percent(active_now_count)
-    active_window_cutoff   = GeoPointLiveVisit::ACTIVE_WINDOW.ago
-    previous_window_cutoff = 1.hour.ago
+    target_time = 1.hour.ago
 
-    previous_count = GeoPointLiveVisit
-                       .where(geo_project_id: @project.id, inside_radius: true)
-                       .where(last_seen_at: previous_window_cutoff...active_window_cutoff)
-                       .count
+    snapshot = LiveVisitSnapshot
+      .where(geo_project_id: @project.id, geo_point_id: nil)
+      .where(sampled_at: (target_time - 8.minutes)..(target_time + 8.minutes))
+      .order(:sampled_at)
+      .last
 
-    if previous_count > 0
-      ((active_now_count - previous_count) / previous_count.to_f * 100).round
+    return nil if snapshot.nil?
+
+    past_count = snapshot.active_count
+    if past_count > 0
+      ((active_now_count - past_count) / past_count.to_f * 100).round
     elsif active_now_count > 0
       100
     else
@@ -60,13 +63,15 @@ module LiveVisitsQueryable
     ActiveSupport::TimeZone[owner_tz] || Time.zone
   end
 
-  # Returns the hour block with the most inside-radius sessions today, e.g.:
+  # Returns the hour block with the highest simultaneous active count today, e.g.:
   #   { label: "14:00–15:00", count: 34 }
-  # Returns nil when there are no inside-radius records for today.
+  # Returns nil when no snapshots exist for today.
+  #
+  # Uses project-level snapshots (geo_point_id: nil).  Each snapshot records the
+  # number of users active AT that moment, so grouping by hour and taking the
+  # MAX gives the peak concurrency — not a count of events or session records.
   #
   # "Today" and hour labels are expressed in the project owner's timezone.
-  # Grouping is done in Ruby (not DATE_TRUNC) because Rails does not support
-  # bind parameters inside group() clauses.
   def peak_today
     tz  = project_time_zone
     now = Time.current.in_time_zone(tz)
@@ -74,16 +79,16 @@ module LiveVisitsQueryable
     today_start = now.beginning_of_day
     today_end   = now.end_of_day
 
-    timestamps = GeoPointLiveVisit
-                   .where(geo_project_id: @project.id, inside_radius: true)
-                   .where(last_seen_at: today_start..today_end)
-                   .pluck(:last_seen_at)
+    snapshots = LiveVisitSnapshot
+      .where(geo_project_id: @project.id, geo_point_id: nil)
+      .where(sampled_at: today_start..today_end)
+      .pluck(:sampled_at, :active_count)
 
-    return nil if timestamps.empty?
+    return nil if snapshots.empty?
 
-    counts_by_hour = timestamps
-                       .group_by { |ts| ts.in_time_zone(tz).beginning_of_hour }
-                       .transform_values(&:count)
+    counts_by_hour = snapshots
+      .group_by { |ts, _| ts.in_time_zone(tz).beginning_of_hour }
+      .transform_values { |group| group.map(&:last).max }
 
     hour_start, count = counts_by_hour.max_by { |_, cnt| cnt }
 
