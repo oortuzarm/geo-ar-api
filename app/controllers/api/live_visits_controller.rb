@@ -116,11 +116,11 @@ module Api
     # in outside_sessions.  This also aligns the historical source with
     # ActivityOutsideAreasService#historical_coordinates.
     #
-    # A session is classified as "inside" if ANY of its coordinates during the
-    # period falls inside at least one active GeoPoint boundary.  It is
-    # classified as "outside" if ANY of its coordinates falls outside all active
-    # boundaries.  A session can belong to both groups.
-    # total = |inside ∪ outside| (union, not sum — avoids double-counting).
+    # Classification:
+    #   inside  = sessions with ≥1 coordinate inside any active GeoPoint boundary.
+    #   outside = sessions that never entered any active GeoPoint boundary.
+    #   total   = all sessions detected during the period.
+    #   total   = inside + outside  (sets are disjoint by construction).
     def period_people_counts
       from = parse_date_param(:from)
       to   = parse_date_param(:to)
@@ -143,24 +143,19 @@ module Api
         .group_by { |sid, _lat, _lng| sid }
         .transform_values { |r| r.map { |_sid, lat, lng| [lat, lng] } }
 
-      inside_sessions  = Set.new
-      outside_sessions = Set.new
+      inside_sessions = Set.new
 
       coords_by_session.each do |session_id, coords|
-        coords.each do |lat, lng|
-          if active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
-            inside_sessions << session_id
-          else
-            outside_sessions << session_id
-          end
-          # Short-circuit once this session is in both groups.
-          break if inside_sessions.include?(session_id) && outside_sessions.include?(session_id)
+        # Short-circuit at the first coordinate found inside any boundary.
+        if coords.any? { |lat, lng| active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) } }
+          inside_sessions << session_id
         end
       end
 
-      total = (inside_sessions | outside_sessions).size
+      all_sessions     = Set.new(coords_by_session.keys)
+      outside_sessions = all_sessions - inside_sessions
 
-      [ inside_sessions.size, outside_sessions.size, total ]
+      [ inside_sessions.size, outside_sessions.size, all_sessions.size ]
     end
 
     def parse_date_param(key)
