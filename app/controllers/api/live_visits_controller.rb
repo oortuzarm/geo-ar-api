@@ -50,7 +50,7 @@ module Api
       active_now_count = ranked.sum { |p| p[:activeNow] }
 
       live_inside, live_outside, live_total = three_way_live_counts
-      period_inside, period_outside, period_total = period_people_counts
+      period_inside, period_outside, period_mixed, period_total = period_people_counts
 
       render json: {
         activeNow:               active_now_count,
@@ -59,6 +59,7 @@ module Api
         liveVisitsTotal:         live_total,
         periodPeopleInsideAreas:  period_inside,
         periodPeopleOutsideAreas: period_outside,
+        periodPeopleMixed:        period_mixed,
         periodPeopleTotal:        period_total,
         mostActivePoint:         ranked.first,
         points:                  ranked,
@@ -117,10 +118,11 @@ module Api
     # ActivityOutsideAreasService#historical_coordinates.
     #
     # Classification:
-    #   inside  = sessions with ≥1 coordinate inside any active GeoPoint boundary.
-    #   outside = sessions that never entered any active GeoPoint boundary.
-    #   total   = all sessions detected during the period.
-    #   total   = inside + outside  (sets are disjoint by construction).
+    #   inside          = sessions with ≥1 coordinate inside any active GeoPoint boundary.
+    #   outside         = sessions that never entered any active GeoPoint boundary (disjoint from inside).
+    #   mixed           = sessions with coordinates both inside and outside active boundaries.
+    #   total           = all sessions detected during the period.
+    #   total           = inside + outside  (sets are disjoint by construction).
     def period_people_counts
       from = parse_date_param(:from)
       to   = parse_date_param(:to)
@@ -144,18 +146,29 @@ module Api
         .transform_values { |r| r.map { |_sid, lat, lng| [lat, lng] } }
 
       inside_sessions = Set.new
+      mixed_sessions  = Set.new
 
       coords_by_session.each do |session_id, coords|
-        # Short-circuit at the first coordinate found inside any boundary.
-        if coords.any? { |lat, lng| active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) } }
-          inside_sessions << session_id
+        has_inside  = false
+        has_outside = false
+
+        coords.each do |lat, lng|
+          if active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
+            has_inside = true
+          else
+            has_outside = true
+          end
+          break if has_inside && has_outside
         end
+
+        inside_sessions << session_id if has_inside
+        mixed_sessions  << session_id if has_inside && has_outside
       end
 
       all_sessions     = Set.new(coords_by_session.keys)
       outside_sessions = all_sessions - inside_sessions
 
-      [ inside_sessions.size, outside_sessions.size, all_sessions.size ]
+      [ inside_sessions.size, outside_sessions.size, mixed_sessions.size, all_sessions.size ]
     end
 
     def parse_date_param(key)
