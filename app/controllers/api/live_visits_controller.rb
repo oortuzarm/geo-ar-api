@@ -68,6 +68,114 @@ module Api
       }
     end
 
+    # GET /api/geo_projects/:id/inside_only_sessions
+    # Returns the last recorded GPS position for sessions that were detected
+    # inside at least one active GeoPoint and NEVER outside any boundary.
+    # Count matches periodPeopleInsideAreas - periodPeopleMixed.
+    def inside_only_sessions
+      from = parse_date_param(:from)
+      to   = parse_date_param(:to)
+
+      active_points = @project.geo_points.where(active: true).to_a
+
+      scope = AnalyticsEvent
+        .where(geo_project_id: @project.id, event_type: "project_location")
+        .where.not(latitude: nil, longitude: nil)
+        .where(latitude: -90.0..90.0, longitude: -180.0..180.0)
+        .where("NOT (latitude = 0 AND longitude = 0)")
+
+      scope = scope.where(event_date: from..) if from
+      scope = scope.where(event_date: ..to)   if to
+
+      rows = scope.pluck(:session_id, :latitude, :longitude, :event_date)
+
+      by_session = rows.group_by { |sid, _lat, _lng, _date| sid }
+
+      positions = []
+
+      by_session.each do |_session_id, session_rows|
+        has_inside  = false
+        has_outside = false
+
+        session_rows.each do |_sid, lat, lng, _date|
+          if active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
+            has_inside = true
+          else
+            has_outside = true
+          end
+          break if has_inside && has_outside
+        end
+
+        next unless has_inside && !has_outside
+
+        last_row = session_rows.max_by { |_sid, _lat, _lng, date| date }
+        positions << { lat: last_row[1], lng: last_row[2] }
+      end
+
+      render json: { positions: positions }
+    end
+
+    # GET /api/geo_projects/:id/live_outside_positions
+    # Returns the current GPS position of every active session outside all active
+    # GeoPoint boundaries.  Count always matches liveVisitsOutsideAreas in #index.
+    def live_outside_positions
+      active_points = @project.geo_points.where(active: true).to_a
+
+      positions = ProjectLiveVisit
+        .where(geo_project_id: @project.id)
+        .active_now
+        .where.not(lat: nil, lng: nil)
+        .where("NOT (lat = 0 AND lng = 0)")
+        .pluck(:lat, :lng)
+        .reject { |lat, lng|
+          active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
+        }
+        .map { |lat, lng| { lat: lat, lng: lng } }
+
+      render json: { positions: positions }
+    end
+
+    # GET /api/geo_projects/:id/outside_sessions
+    # Returns the last recorded GPS position for each session that was detected
+    # during the period but never entered any active GeoPoint boundary.
+    # One position per session — count equals periodPeopleOutsideAreas.
+    def outside_sessions
+      from = parse_date_param(:from)
+      to   = parse_date_param(:to)
+
+      active_points = @project.geo_points.where(active: true).to_a
+
+      scope = AnalyticsEvent
+        .where(geo_project_id: @project.id, event_type: "project_location")
+        .where.not(latitude: nil, longitude: nil)
+        .where(latitude: -90.0..90.0, longitude: -180.0..180.0)
+        .where("NOT (latitude = 0 AND longitude = 0)")
+
+      scope = scope.where(event_date: from..) if from
+      scope = scope.where(event_date: ..to)   if to
+
+      rows = scope.pluck(:session_id, :latitude, :longitude, :event_date)
+
+      by_session = rows.group_by { |sid, _lat, _lng, _date| sid }
+
+      positions = []
+
+      by_session.each do |_session_id, session_rows|
+        coords = session_rows.map { |_sid, lat, lng, _date| [lat, lng] }
+
+        was_inside = coords.any? { |lat, lng|
+          active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
+        }
+
+        next if was_inside
+
+        last_row = session_rows.max_by { |_sid, _lat, _lng, date| date }
+        positions << { lat: last_row[1], lng: last_row[2] }
+      end
+
+      render json: { positions: positions }
+    end
+
     private
 
     def set_and_authorize_project!

@@ -91,6 +91,9 @@ Rails.application.routes.draw do
         get :historical_intensity,    to: "analytics_events#historical_intensity"
         get :analytics_destinations,  to: "analytics_events#analytics_destinations"
         get :live_visits,             to: "live_visits#index"
+        get :outside_sessions,          to: "live_visits#outside_sessions"
+        get :live_outside_positions,    to: "live_visits#live_outside_positions"
+        get :inside_only_sessions,      to: "live_visits#inside_only_sessions"
       end
       resources :geo_points, only: %i[index create]
     end
