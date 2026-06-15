@@ -49,13 +49,14 @@ module Api
 
       active_now_count = ranked.sum { |p| p[:activeNow] }
 
-      live_inside, live_outside, live_total = three_way_live_counts
+      live_inside, live_outside, live_mixed, live_total = three_way_live_counts
       period_inside, period_outside, period_mixed, period_total = period_people_counts
 
       render json: {
         activeNow:               active_now_count,
         liveVisitsInsideAreas:   live_inside,
         liveVisitsOutsideAreas:  live_outside,
+        liveVisitsMixed:         live_mixed,
         liveVisitsTotal:         live_total,
         periodPeopleInsideAreas:  period_inside,
         periodPeopleOutsideAreas: period_outside,
@@ -117,7 +118,9 @@ module Api
 
     # GET /api/geo_projects/:id/live_inside_positions
     # Returns the current GPS position of every active session inside at least one
-    # active GeoPoint boundary.  Count always matches liveVisitsInsideAreas in #index.
+    # active GeoPoint boundary.  Count matches liveVisitsInsideAreas in #index.
+    # Because liveVisitsMixed is always 0 for live, this equals the "only inside"
+    # category (liveVisitsInsideAreas - liveVisitsMixed).
     def live_inside_positions
       active_points = @project.geo_points.where(active: true).to_a
 
@@ -137,7 +140,9 @@ module Api
 
     # GET /api/geo_projects/:id/live_outside_positions
     # Returns the current GPS position of every active session outside all active
-    # GeoPoint boundaries.  Count always matches liveVisitsOutsideAreas in #index.
+    # GeoPoint boundaries.  Count matches liveVisitsOutsideAreas in #index.
+    # Because liveVisitsMixed is always 0 for live, this equals the "only outside"
+    # category.
     def live_outside_positions
       active_points = @project.geo_points.where(active: true).to_a
 
@@ -153,6 +158,16 @@ module Api
         .map { |lat, lng| { lat: lat, lng: lng } }
 
       render json: { positions: positions }
+    end
+
+    # GET /api/geo_projects/:id/live_mixed_positions
+    # Returns the current GPS positions of active sessions that are simultaneously
+    # inside and outside active GeoPoint boundaries.
+    # Always returns an empty array for live mode: ProjectLiveVisit stores one
+    # snapshot per session (the latest position), so a session can only be inside
+    # or outside at any given moment — never both.  liveVisitsMixed is always 0.
+    def live_mixed_positions
+      render json: { positions: [] }
     end
 
     # GET /api/geo_projects/:id/outside_sessions
@@ -203,20 +218,24 @@ module Api
       authorize_project!(@project)
     end
 
-    # Returns [inside, outside, total] using the same geospatial criterion as
-    # ActivityOutsideAreasService: each unique session's latest coordinates are
-    # crossed against ALL active GeoPoints via GeoEngine.inside_boundary?.
+    # Returns [inside, outside, mixed, total] — the same four-category model as
+    # period_people_counts, applied to the active live window (45 seconds).
     #
-    # This correctly handles:
-    #   - sessions whose heartbeat was sent to geo_point A but whose coordinates
-    #     fall inside geo_point B's boundary (radius or polygon)
-    #   - sessions inside an inactive geo_point (always counted as outside)
-    #   - sessions active across multiple overlapping geo_points (counted once)
+    # ProjectLiveVisit stores one row per (session, project) — always the latest
+    # known position.  A single GPS snapshot is either inside or outside a boundary,
+    # never both simultaneously, so mixed is structurally always 0 for live.
+    #
+    #   inside  = sessions whose current position is inside ≥1 active boundary.
+    #   outside = sessions whose current position is outside all active boundaries.
+    #   mixed   = 0 (single-snapshot model cannot produce inside-and-outside).
+    #   total   = inside + outside + mixed.
+    #
+    # Because mixed = 0: inside equals "solo en ubicaciones" and outside equals
+    # "exclusivamente fuera", making live fully consistent with the historical model.
     def three_way_live_counts
       active_points = @project.geo_points.where(active: true).to_a
 
-      # ProjectLiveVisit has a unique index on (geo_project_id, session_id), so
-      # each row is already the latest position for that session — no dedup needed.
+      # One row per active session — no dedup needed.
       sessions = ProjectLiveVisit
         .where(geo_project_id: @project.id)
         .active_now
@@ -230,7 +249,7 @@ module Api
       live_total   = sessions.size
       live_outside = live_total - live_inside
 
-      [ live_inside, live_outside, live_total ]
+      [ live_inside, live_outside, 0, live_total ]
     end
 
     # Returns [inside, outside, total] unique-person counts for the requested
