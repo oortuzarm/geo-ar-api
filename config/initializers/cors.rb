@@ -14,8 +14,9 @@ LANDING_ORIGINS = [
   "https://www.ubyca.com"
 ].freeze
 
-# Smart Links redirect domain.
-# Credential-free; only the two public Smart Link endpoints are exposed.
+# Smart Proxy domain — serves proxied pages and injected validation scripts.
+# Credential-free; exposes /api/public/* for geo_project/geo_point lookups and
+# live_visit heartbeats triggered by the injected browser script.
 GO_ORIGINS = [
   "https://go.ubyca.com"
 ].freeze
@@ -40,10 +41,9 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
              credentials: false
   end
 
-  # Smart Links / Smart Proxy redirect domain — public, credential-free.
-  # Covers the entire /api/public/* namespace: Smart Link resolve + validate,
-  # geo_project show, geo_points index + access, live_visit heartbeat, and
-  # Smart Proxy analytics events (smart_proxy_events).
+  # Smart Proxy domain — public, credential-free.
+  # Covers /api/public/*: geo_project show, geo_points index + access,
+  # live_visit heartbeat, and Smart Proxy analytics events.
   allow do
     origins(*GO_ORIGINS)
     resource "/api/public/*",

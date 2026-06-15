@@ -5,7 +5,6 @@ require "test_helper"
 # Each scenario must return 204 (no 500) and leave the DB consistent.
 # Previously failing cases:
 #   - geo_point_collections table missing (migration pending) → PG::UndefinedTable
-#   - smart_link_geo_points FK without on_delete → PG::ForeignKeyViolation
 class Api::GeoPointsDestroyTest < ActionDispatch::IntegrationTest
   setup do
     @user = User.create!(
@@ -26,8 +25,6 @@ class Api::GeoPointsDestroyTest < ActionDispatch::IntegrationTest
 
   teardown do
     GeoPointCollection.delete_all
-    SmartLinkGeoPoint.delete_all
-    SmartLink.delete_all
     AnalyticsEvent.delete_all
     GeoPointLiveVisit.delete_all
     GeoPoint.delete_all
@@ -82,32 +79,6 @@ class Api::GeoPointsDestroyTest < ActionDispatch::IntegrationTest
       delete "/api/geo_points/#{point.id}", as: :json
     end
     assert_response :no_content
-  end
-
-  # ── SmartLink reference ───────────────────────────────────────────────────────
-  # smart_link_geo_points has a FK to geo_points with no on_delete.
-  # GeoPoint now has has_many :smart_link_geo_points, dependent: :destroy
-  # so the join row is removed before the FK check fires.
-
-  test "deletes a point referenced by a SmartLink and returns 204" do
-    point      = create_point("SmartLink Point")
-    smart_link = SmartLink.create!(
-      user:             @user,
-      organization:     @org,
-      project:          @project,
-      name:             "Test SL #{SecureRandom.hex(4)}",
-      scope_type:       "project",
-      destination_type: "external_url",
-      destination_url:  "https://example.com",
-      status:           "active"
-    )
-    SmartLinkGeoPoint.create!(smart_link: smart_link, geo_point: point)
-
-    assert_difference "SmartLinkGeoPoint.count", -1 do
-      delete "/api/geo_points/#{point.id}", as: :json
-    end
-    assert_response :no_content
-    assert smart_link.reload.present?, "SmartLink itself must survive"
   end
 
   # ── Collection prerequisite ───────────────────────────────────────────────────

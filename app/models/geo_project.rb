@@ -7,7 +7,6 @@ class GeoProject < ApplicationRecord
 
   has_many :geo_points,        -> { order(:order) }, dependent: :destroy, inverse_of: :geo_project
   has_many :analytics_events,  dependent: :destroy
-  has_many :smart_links,       foreign_key: :project_id, dependent: :destroy, inverse_of: :project
 
   VIEW_MODES = %w[fit_points custom].freeze
 

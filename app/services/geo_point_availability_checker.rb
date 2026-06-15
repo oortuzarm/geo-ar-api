@@ -14,13 +14,12 @@
 #
 # Used by:
 #   - Api::V1::PresenceValidationService  (single known point)
-#   - SmartLinkValidationService          (one candidate at a time)
 class GeoPointAvailabilityChecker
   Result = Struct.new(
     :passed,
-    :reason,      # String or nil — failure code, matches existing failure_reason values
-    :checks,      # Hash — full per-check diagnostics (consumed by PresenceValidationService)
-    :availability, # Hash — extra data for frontend messages (consumed by SmartLinkValidationService)
+    :reason,       # String or nil — failure code, matches existing failure_reason values
+    :checks,       # Hash — full per-check diagnostics (consumed by PresenceValidationService)
+    :availability, # Hash — extra data for frontend availability messages
     keyword_init: true
   )
 

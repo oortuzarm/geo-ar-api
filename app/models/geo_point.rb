@@ -9,7 +9,6 @@ class GeoPoint < ApplicationRecord
   has_many   :geo_point_live_visits, dependent: :destroy
   has_many   :geo_point_collections, dependent: :destroy
   has_many   :required_geo_points,   through:   :geo_point_collections
-  has_many   :smart_link_geo_points, dependent: :destroy
 
   validates :latitude,           presence: true, numericality: { greater_than_or_equal_to: -90,  less_than_or_equal_to: 90 }
   validates :longitude,          presence: true, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }

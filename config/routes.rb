@@ -72,10 +72,6 @@ Rails.application.routes.draw do
       post "geo_projects/:id/live_location", to: "project_live_locations#create"
       get "settings", to: "settings#index"
 
-      # Smart Links public endpoints — namespaced by organization slug
-      get  "smart_links/:organization_slug/:slug",          to: "smart_links#show",     as: :smart_link
-      post "smart_links/:organization_slug/:slug/validate", to: "smart_links#validate", as: :validate_smart_link
-
       # Smart Proxy analytics events — emitted by the injected browser script
       post "smart_proxy_events", to: "smart_proxy_events#create"
     end
@@ -152,9 +148,6 @@ Rails.application.routes.draw do
     end
 
     resources :analytics_events, only: %i[create]
-
-    # Smart Links Studio CRUD
-    resources :smart_links
 
     # Smart Proxies — Studio CRUD + analytics endpoints
     # Collection live_visits: org-level summary across all proxies.
