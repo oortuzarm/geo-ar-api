@@ -61,6 +61,13 @@ module Api
         location.content_type == "url" ? location.destination_category.presence : nil
       end
 
+      # Physical/functional nature of the place.
+      # Values: gastronomy | retail | health | tourism | culture | education | services | events |
+      #         entertainment | transport | accommodation | sport | real_estate | corporate | other
+      field :pointCategory do |location|
+        location.point_category.presence
+      end
+
       field :createdAt do |location|
         location.created_at.iso8601(3)
       end

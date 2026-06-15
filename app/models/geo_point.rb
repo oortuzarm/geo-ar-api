@@ -3,6 +3,8 @@ class GeoPoint < ApplicationRecord
   ACTIVATION_MODES       = %w[radius polygon].freeze
   DESTINATION_CATEGORIES = %w[website whatsapp form reservation ecommerce social map coupon custom].freeze
   POINT_MODES            = %w[unlock informative].freeze
+  POINT_CATEGORIES       = %w[gastronomy retail health tourism culture education services events
+                               entertainment transport accommodation sport real_estate corporate other].freeze
 
   belongs_to :geo_project, inverse_of: :geo_points
   has_many   :analytics_events,      dependent: :destroy
@@ -19,6 +21,8 @@ class GeoPoint < ApplicationRecord
                                     unless: -> { point_mode == "informative" }
   validates :activation_mode,       inclusion: { in: ACTIVATION_MODES }
   validates :destination_category,  inclusion: { in: DESTINATION_CATEGORIES },
+                                    allow_nil: true, allow_blank: true
+  validates :point_category,        inclusion: { in: POINT_CATEGORIES },
                                     allow_nil: true, allow_blank: true
   validates :activation_polygon, presence: true, if: -> { activation_mode == "polygon" }
   validate  :activation_polygon_is_valid_geojson,
@@ -54,6 +58,7 @@ class GeoPoint < ApplicationRecord
       contentType:          content_type,
       contentData:          content_data,
       destinationCategory:  destination_category.presence,
+      pointCategory:        point_category.presence,
       latitude:           latitude,
       longitude:          longitude,
       activationRadius:   activation_radius,
