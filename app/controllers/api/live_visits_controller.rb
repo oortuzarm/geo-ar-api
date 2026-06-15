@@ -115,6 +115,26 @@ module Api
       render json: { positions: positions }
     end
 
+    # GET /api/geo_projects/:id/live_inside_positions
+    # Returns the current GPS position of every active session inside at least one
+    # active GeoPoint boundary.  Count always matches liveVisitsInsideAreas in #index.
+    def live_inside_positions
+      active_points = @project.geo_points.where(active: true).to_a
+
+      positions = ProjectLiveVisit
+        .where(geo_project_id: @project.id)
+        .active_now
+        .where.not(lat: nil, lng: nil)
+        .where("NOT (lat = 0 AND lng = 0)")
+        .pluck(:lat, :lng)
+        .select { |lat, lng|
+          active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
+        }
+        .map { |lat, lng| { lat: lat, lng: lng } }
+
+      render json: { positions: positions }
+    end
+
     # GET /api/geo_projects/:id/live_outside_positions
     # Returns the current GPS position of every active session outside all active
     # GeoPoint boundaries.  Count always matches liveVisitsOutsideAreas in #index.
