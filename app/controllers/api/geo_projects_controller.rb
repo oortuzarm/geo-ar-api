@@ -112,6 +112,7 @@ module Api
               "content_type"         => pt.fetch("content_type", "url").presence || "url",
               "content_data"         => pt.fetch("content_data", {}) || {},
               "destination_category" => pt["destination_category"].presence,
+              "point_category"       => pt["point_category"].presence,
               "latitude"          => pt["latitude"],
               "longitude"         => pt["longitude"],
               "activation_radius" => pt["activation_radius"],
@@ -139,7 +140,7 @@ module Api
           end
 
           base_columns = %w[
-            name lookiar_url content_type content_data destination_category
+            name lookiar_url content_type content_data destination_category point_category
             latitude longitude activation_radius activation_mode activation_polygon
             description instructions button_text active order
             availability images updated_at
@@ -238,7 +239,7 @@ module Api
         :public_initial_view_mode, :public_initial_center_lat, :public_initial_center_lng, :public_initial_zoom,
         :project_logo_url, :project_logo_zoom, :project_logo_position_x, :project_logo_position_y,
         geo_points: [
-          :id, :name, :lookiar_url, :content_type, :destination_category,
+          :id, :name, :lookiar_url, :content_type, :destination_category, :point_category,
           :latitude, :longitude, :activation_radius, :activation_mode,
           :image, :description, :instructions, :active, :order, :button_text,
           :point_logo_url, :point_logo_zoom, :point_logo_position_x, :point_logo_position_y,
