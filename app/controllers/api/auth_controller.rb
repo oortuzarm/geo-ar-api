@@ -27,6 +27,9 @@ module Api
       EmailVerificationMailer.send_verification_email(user: user, code: code)
 
       render json: { status: "pending_verification", email: user.email }, status: :created
+    rescue ActiveRecord::RecordInvalid => e
+      Rails.logger.error("[REGISTER_ERROR] #{e.record.errors.full_messages}")
+      raise
     end
 
     # POST /api/auth/login
