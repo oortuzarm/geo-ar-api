@@ -16,6 +16,17 @@ class Organization < ApplicationRecord
   private
 
   def generate_slug_from_name
-    self.slug = slug.present? ? slug.to_s.parameterize : name.to_s.parameterize
+    return if slug.present?
+
+    base      = name.to_s.parameterize.presence || "organizacion"
+    candidate = base
+    counter   = 1
+
+    while Organization.where.not(id: id).exists?(slug: candidate)
+      candidate = "#{base}-#{counter}"
+      counter  += 1
+    end
+
+    self.slug = candidate
   end
 end
