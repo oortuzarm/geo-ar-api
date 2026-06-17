@@ -17,7 +17,7 @@ class User < ApplicationRecord
   before_destroy :purge_sole_owned_organizations
 
   ROLES                 = %w[user admin].freeze
-  STATUSES              = %w[active suspended].freeze
+  STATUSES              = %w[active suspended pending_email_verification].freeze
   SUBSCRIPTION_STATUSES = %w[trial active expired canceled].freeze
 
   before_save { email&.downcase! }
@@ -104,6 +104,35 @@ class User < ApplicationRecord
 
     current_location_count < limit
   end
+
+  # ── Email verification ─────────────────────────────────────────────────────
+
+  VERIFICATION_CODE_EXPIRY = 15.minutes
+
+  def generate_email_verification_code!
+    code = rand(100_000..999_999).to_s
+    update_columns(
+      email_verification_code:    code,
+      email_verification_sent_at: Time.current
+    )
+    code
+  end
+
+  def email_verification_code_expired?
+    return true if email_verification_sent_at.nil?
+    email_verification_sent_at < VERIFICATION_CODE_EXPIRY.ago
+  end
+
+  def confirm_email!
+    update_columns(
+      email_confirmed_at:        Time.current,
+      email_verification_code:   nil,
+      email_verification_sent_at: nil,
+      status:                    "active"
+    )
+  end
+
+  # ── API access ─────────────────────────────────────────────────────────────
 
   # Whether the user's plan grants API access.
   # nil plan (no plan assigned yet) → allow, so admin users and legacy accounts are unblocked.

@@ -16,14 +16,17 @@ module Api
           password:              params[:password],
           password_confirmation: params[:password_confirmation],
           role:                  "user",
-          status:                "active",
+          status:                "pending_email_verification",
           **plan_attrs
         )
         org = Organization.create!(name: "Mi organización")
         user.memberships.create!(organization: org, role: "owner")
       end
-      session[:user_id] = user.id
-      render json: user_json(user), status: :created
+
+      code = user.generate_email_verification_code!
+      EmailVerificationMailer.send_verification_email(user: user, code: code)
+
+      render json: { status: "pending_verification", email: user.email }, status: :created
     end
 
     # POST /api/auth/login
@@ -40,8 +43,57 @@ module Api
         return
       end
 
+      if user.status == "pending_email_verification"
+        render json: {
+          error: "Debes verificar tu correo electrónico antes de iniciar sesión.",
+          code:  "email_not_verified",
+          email: user.email
+        }, status: :forbidden
+        return
+      end
+
       session[:user_id] = user.id
       render json: user_json(user)
+    end
+
+    # POST /api/auth/verify_email_code
+    def verify_email_code
+      user = User.find_by(email: params[:email]&.downcase&.strip)
+
+      if user.nil? || user.status != "pending_email_verification"
+        render json: { error: "No hay ninguna verificación pendiente para ese correo." }, status: :unprocessable_entity
+        return
+      end
+
+      if user.email_verification_code_expired?
+        render json: { error: "El código expiró. Solicitá uno nuevo.", code: "code_expired" }, status: :unprocessable_entity
+        return
+      end
+
+      submitted = params[:code].to_s.strip
+      unless ActiveSupport::SecurityUtils.secure_compare(user.email_verification_code.to_s, submitted)
+        render json: { error: "Código incorrecto. Verificá e intentá de nuevo.", code: "invalid_code" }, status: :unprocessable_entity
+        return
+      end
+
+      user.confirm_email!
+      session[:user_id] = user.id
+      render json: user_json(user)
+    end
+
+    # POST /api/auth/resend_verification_code
+    def resend_verification_code
+      user = User.find_by(email: params[:email]&.downcase&.strip)
+
+      if user.nil? || user.status != "pending_email_verification"
+        render json: { message: "Si ese correo está pendiente de verificación, recibirás un nuevo código." }
+        return
+      end
+
+      code = user.generate_email_verification_code!
+      EmailVerificationMailer.send_verification_email(user: user, code: code)
+
+      render json: { message: "Código reenviado. Revisá tu correo." }
     end
 
     # GET /api/auth/me

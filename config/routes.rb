@@ -47,12 +47,14 @@ Rails.application.routes.draw do
       get :outside_areas, to: "outside_areas#index"
     end
 
-    post   "auth/register",        to: "auth#register"
-    post   "auth/login",           to: "auth#login"
-    get    "auth/me",              to: "auth#me"
-    delete "auth/logout",          to: "auth#logout"
-    post   "auth/forgot_password", to: "auth#forgot_password"
-    post   "auth/reset_password",  to: "auth#reset_password"
+    post   "auth/register",                  to: "auth#register"
+    post   "auth/login",                     to: "auth#login"
+    get    "auth/me",                        to: "auth#me"
+    delete "auth/logout",                    to: "auth#logout"
+    post   "auth/forgot_password",           to: "auth#forgot_password"
+    post   "auth/reset_password",            to: "auth#reset_password"
+    post   "auth/verify_email_code",         to: "auth#verify_email_code"
+    post   "auth/resend_verification_code",  to: "auth#resend_verification_code"
 
     namespace :public do
       resources :geo_projects, only: %i[show] do
