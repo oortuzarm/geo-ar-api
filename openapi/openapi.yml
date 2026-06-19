@@ -1,0 +1,685 @@
+openapi: 3.1.0
+
+info:
+  title: Ubyca Presence API
+  version: v1
+  description: |
+    API para validar presencia geográfica y determinar si una ubicación cumple
+    las reglas configuradas de disponibilidad, geofencing, horario, cupos,
+    dwell y live visits.
+
+    ## Autenticación
+
+    Todos los endpoints requieren credenciales de API. Se soportan dos formatos
+    equivalentes en el header `Authorization`:
+
+    **HTTP Basic (recomendado):**
+    ```
+    Authorization: Basic base64(key_public:key_secret)
+    ```
+
+    **Bearer Pair:**
+    ```
+    Authorization: Bearer key_public:key_secret
+    ```
+
+    Las credenciales se crean y gestionan desde Studio.
+
+servers:
+  - url: https://geo-ar-api.railway.app
+    description: Production
+  - url: http://localhost:3001
+    description: Development
+
+tags:
+  - name: Presence
+    description: Validate geographic presence against location availability rules.
+
+security:
+  - basicAuth: []
+  - bearerPair: []
+
+paths:
+  /api/v1/presence/validate:
+    post:
+      tags:
+        - Presence
+      operationId: presenceValidate
+      summary: Validate presence (with side effects)
+      description: |
+        Validates whether a user is inside the configured boundary of a location
+        and passes all availability rules (schedule, quota, live visits, dwell).
+
+        **Side effects (not a dry-run):**
+        - Consumes quota if the location has a quota configured.
+        - Records a `presence.validated` analytics event.
+        - Records a `destination.delivered` analytics event when `valid` is `true`
+          and a destination exists.
+        - Upserts the live visit for the session.
+        - Returns a non-null `eventId` when the event was recorded successfully.
+
+        For dry-run validation without side effects, use `POST /api/v1/presence/check`.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresenceRequest'
+            example:
+              location_id: "42"
+              session_id: "session-abc-123"
+              coordinates:
+                latitude: -33.4372
+                longitude: -70.6506
+                accuracy_meters: 8.0
+              dwell_elapsed_seconds: 120
+              timestamp: "2026-06-19T15:30:00Z"
+              context:
+                user_ref: "user-xyz"
+                metadata:
+                  channel: "mobile"
+      responses:
+        "200":
+          description: |
+            Presence evaluated. HTTP 200 is returned for both passing and failing
+            validations — use `valid` and `failureReason` to interpret the outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresenceResponse'
+              examples:
+                valid:
+                  summary: All checks passed
+                  value:
+                    valid: true
+                    locationId: "42"
+                    sessionId: "session-abc-123"
+                    checks:
+                      locationActive: true
+                      insideBoundary: true
+                      boundaryType: "radius"
+                      distanceMeters: 34.7
+                      scheduleActive: true
+                      quotaAvailable: true
+                      quotaRemaining: 9
+                      liveVisitsEnabled: false
+                      liveVisitsMet: true
+                      dwellRequired: false
+                      dwellTimeMet: true
+                    destination:
+                      type: "url"
+                      url: "https://example.com/contenido"
+                    failureReason: null
+                    eventId: "789"
+                outside_boundary:
+                  summary: User outside boundary
+                  value:
+                    valid: false
+                    locationId: "42"
+                    sessionId: "session-abc-123"
+                    checks:
+                      locationActive: true
+                      insideBoundary: false
+                      boundaryType: "radius"
+                      distanceMeters: 312.4
+                    destination: null
+                    failureReason: "outside_boundary"
+                    eventId: "790"
+                quota_exhausted:
+                  summary: Quota exhausted
+                  value:
+                    valid: false
+                    locationId: "42"
+                    sessionId: "session-abc-123"
+                    checks:
+                      locationActive: true
+                      insideBoundary: true
+                      boundaryType: "radius"
+                      distanceMeters: 12.3
+                      scheduleActive: true
+                      quotaAvailable: false
+                      quotaRemaining: 0
+                    destination: null
+                    failureReason: "quota_exhausted"
+                    eventId: "791"
+                dwell_not_met:
+                  summary: Dwell time not met
+                  value:
+                    valid: false
+                    locationId: "42"
+                    sessionId: "session-abc-123"
+                    checks:
+                      locationActive: true
+                      insideBoundary: true
+                      boundaryType: "radius"
+                      distanceMeters: 8.1
+                      scheduleActive: true
+                      quotaAvailable: true
+                      quotaRemaining: 4
+                      liveVisitsEnabled: false
+                      liveVisitsMet: true
+                      dwellRequired: true
+                      dwellTimeMet: false
+                    destination: null
+                    failureReason: "dwell_time_not_met"
+                    eventId: "792"
+                minimum_live_visits:
+                  summary: Not enough concurrent users
+                  value:
+                    valid: false
+                    locationId: "42"
+                    sessionId: "session-abc-123"
+                    checks:
+                      locationActive: true
+                      insideBoundary: true
+                      boundaryType: "radius"
+                      distanceMeters: 5.0
+                      scheduleActive: true
+                      quotaAvailable: true
+                      quotaRemaining: 10
+                      liveVisitsEnabled: true
+                      liveVisitsRequired: 3
+                      liveVisitsCurrent: 1
+                      liveVisitsMet: false
+                    destination: null
+                    failureReason: "minimum_live_visits_not_reached"
+                    eventId: "793"
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenValidate'
+        "404":
+          $ref: '#/components/responses/LocationNotFound'
+        "409":
+          $ref: '#/components/responses/IdempotencyConflict'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/presence/check:
+    post:
+      tags:
+        - Presence
+      operationId: presenceCheck
+      summary: Check presence (dry-run, no side effects)
+      description: |
+        Dry-run version of `/presence/validate`. Evaluates the full availability
+        rule chain without producing any side effects.
+
+        **No side effects:**
+        - Does not consume quota.
+        - Does not record analytics events.
+        - Does not update live visits.
+        - `eventId` is always `null`.
+
+        Useful for pre-validating before committing a full `/validate` call.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresenceRequest'
+            example:
+              location_id: "42"
+              session_id: "session-abc-123"
+              coordinates:
+                latitude: -33.4372
+                longitude: -70.6506
+      responses:
+        "200":
+          description: |
+            Presence evaluated (dry-run). No side effects occurred.
+            `eventId` is always `null` in this response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresenceResponse'
+              examples:
+                valid:
+                  summary: All checks passed (dry-run)
+                  value:
+                    valid: true
+                    locationId: "42"
+                    sessionId: "session-abc-123"
+                    checks:
+                      locationActive: true
+                      insideBoundary: true
+                      boundaryType: "radius"
+                      distanceMeters: 34.7
+                      scheduleActive: true
+                      quotaAvailable: true
+                      quotaRemaining: 9
+                      liveVisitsEnabled: false
+                      liveVisitsMet: true
+                      dwellRequired: false
+                      dwellTimeMet: true
+                    destination:
+                      type: "url"
+                      url: "https://example.com/contenido"
+                    failureReason: null
+                    eventId: null
+                outside_schedule:
+                  summary: Outside operating schedule
+                  value:
+                    valid: false
+                    locationId: "42"
+                    sessionId: "session-abc-123"
+                    checks:
+                      locationActive: true
+                      insideBoundary: true
+                      boundaryType: "radius"
+                      distanceMeters: 5.2
+                      scheduleActive: false
+                    destination: null
+                    failureReason: "outside_schedule"
+                    eventId: null
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenCheck'
+        "404":
+          $ref: '#/components/responses/LocationNotFound'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: |
+        Standard HTTP Basic authentication. Encode `key_public:key_secret`
+        in Base64 and send as `Authorization: Basic <base64>`.
+    bearerPair:
+      type: http
+      scheme: bearer
+      description: |
+        Non-standard bearer format using a colon-separated key pair (not a JWT).
+        Send as `Authorization: Bearer key_public:key_secret`.
+        Equivalent to Basic auth — both formats are accepted.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 255
+      description: |
+        Optional client-generated idempotency key (TTL: 24 hours, max 255 chars).
+        If a completed request with this key exists, the stored response is replayed
+        without re-executing side effects. If a request with this key is currently
+        in flight, a 409 is returned. Only supported on `POST /api/v1/presence/validate`.
+
+  schemas:
+    Coordinates:
+      type: object
+      required:
+        - latitude
+        - longitude
+      properties:
+        latitude:
+          type: number
+          format: float
+          minimum: -90
+          maximum: 90
+          description: Latitude in decimal degrees.
+          example: -33.4372
+        longitude:
+          type: number
+          format: float
+          minimum: -180
+          maximum: 180
+          description: Longitude in decimal degrees.
+          example: -70.6506
+        accuracy_meters:
+          type: number
+          format: float
+          minimum: 0
+          description: GPS accuracy radius in meters (positive). Optional.
+          example: 8.0
+
+    PresenceContext:
+      type: object
+      properties:
+        user_ref:
+          type: string
+          description: Client-side reference for the end user. Stored in analytics events.
+          example: "user-xyz"
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary key-value metadata stored in the analytics event context.
+          example:
+            channel: "mobile"
+
+    PresenceRequest:
+      type: object
+      required:
+        - location_id
+        - session_id
+        - coordinates
+      properties:
+        location_id:
+          type: string
+          description: |
+            Internal GeoPoint identifier. Integer database ID of the target location,
+            scoped to the organization associated with the API credential.
+          example: "42"
+        session_id:
+          type: string
+          minLength: 1
+          description: |
+            Non-empty string identifying the end-user session. No UUID format required.
+            Used to track live visits and deduplicate analytics events.
+          example: "session-abc-123"
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+        dwell_elapsed_seconds:
+          type: integer
+          minimum: 0
+          description: |
+            Seconds the user has spent inside the area. Functionally required when the
+            location has `requires_dwell_time` enabled — omitting it produces
+            `failureReason: dwell_required`. Ignored for locations without dwell.
+          example: 120
+        timestamp:
+          type: string
+          format: date-time
+          description: |
+            ISO 8601 timestamp used for schedule evaluation.
+            Defaults to server time if omitted.
+          example: "2026-06-19T15:30:00Z"
+        context:
+          $ref: '#/components/schemas/PresenceContext'
+
+    PresenceChecks:
+      type: object
+      description: |
+        Per-check diagnostic results serialized in camelCase. Fields are conditional:
+        not all fields appear in every response. Presence depends on the location's
+        configuration and which checks were reached before a failure or completion.
+
+        Conditional fields by feature:
+        - `distanceMeters`: only present when `boundaryType` is `radius`.
+        - `quotaAvailable`, `quotaRemaining`: only present when quota is configured.
+        - `liveVisitsRequired`, `liveVisitsCurrent`: only present when `liveVisitsEnabled` is `true`.
+        - `dwellTimeMet`: only present when `dwellRequired` is `true`.
+
+        Checks are evaluated in order: active → boundary → schedule → quota →
+        live_visits → dwell. Fields for checks not yet reached are absent.
+      properties:
+        locationActive:
+          type: boolean
+          description: Whether the location is active.
+        insideBoundary:
+          type: boolean
+          description: Whether the coordinates fall inside the configured boundary.
+        boundaryType:
+          type: string
+          description: The boundary mode of the location (e.g. `radius`, `polygon`).
+          example: "radius"
+        distanceMeters:
+          type: number
+          format: float
+          description: |
+            Distance from the provided coordinates to the location center, in meters.
+            Present only when `boundaryType` is `radius`.
+          example: 34.7
+        scheduleActive:
+          type: boolean
+          description: Whether the location is within its configured operating schedule.
+        quotaAvailable:
+          type: boolean
+          description: Whether quota is available. Present only when the location has quota configured.
+        quotaRemaining:
+          type: integer
+          description: |
+            Validations remaining in the current quota. Present only when quota is configured.
+          example: 9
+        liveVisitsEnabled:
+          type: boolean
+          description: Whether the live visits minimum is enforced for this location.
+        liveVisitsRequired:
+          type: integer
+          description: |
+            Minimum concurrent users required. Present only when `liveVisitsEnabled` is `true`.
+          example: 3
+        liveVisitsCurrent:
+          type: integer
+          description: |
+            Active users currently in the area, excluding the requesting session.
+            Present only when `liveVisitsEnabled` is `true`.
+          example: 2
+        liveVisitsMet:
+          type: boolean
+          description: |
+            Whether the live visits minimum was satisfied, counting the requesting
+            user as +1 toward the minimum.
+        dwellRequired:
+          type: boolean
+          description: Whether this location requires a minimum dwell time before validation passes.
+        dwellTimeMet:
+          type: boolean
+          description: |
+            Whether the dwell time requirement was satisfied.
+            Present only when `dwellRequired` is `true`.
+
+    Destination:
+      type: object
+      required:
+        - type
+        - url
+      properties:
+        type:
+          type: string
+          enum:
+            - url
+          description: Destination type. Currently always `url`.
+        url:
+          type: string
+          format: uri
+          description: URL to deliver to the user on successful validation.
+          example: "https://example.com/contenido"
+
+    PresenceResponse:
+      type: object
+      required:
+        - valid
+        - locationId
+        - sessionId
+        - checks
+        - destination
+        - failureReason
+        - eventId
+      properties:
+        valid:
+          type: boolean
+          description: |
+            `true` if all availability checks passed. `false` if any check failed.
+            Both outcomes return HTTP 200 — this field determines the business result.
+        locationId:
+          type: string
+          description: ID of the evaluated GeoPoint.
+          example: "42"
+        sessionId:
+          type: string
+          description: Session ID received in the request.
+          example: "session-abc-123"
+        checks:
+          $ref: '#/components/schemas/PresenceChecks'
+        destination:
+          oneOf:
+            - $ref: '#/components/schemas/Destination'
+            - type: "null"
+          description: |
+            Destination to deliver when `valid` is `true` and the location has content
+            configured. `null` when `valid` is `false` or no content is set.
+        failureReason:
+          type:
+            - string
+            - "null"
+          enum:
+            - location_inactive
+            - outside_boundary
+            - outside_schedule
+            - quota_exhausted
+            - minimum_live_visits_not_reached
+            - dwell_required
+            - dwell_time_not_met
+            - null
+          description: |
+            Machine-readable failure code when `valid` is `false`. `null` when `valid` is `true`.
+
+            | Code | Condition |
+            |---|---|
+            | `location_inactive` | The GeoPoint is not active |
+            | `outside_boundary` | Coordinates fall outside the configured area |
+            | `outside_schedule` | Outside the configured operating schedule |
+            | `quota_exhausted` | All quota slots have been consumed |
+            | `minimum_live_visits_not_reached` | Not enough concurrent users in the area |
+            | `dwell_required` | `dwell_elapsed_seconds` not provided for a dwell-required location |
+            | `dwell_time_not_met` | Elapsed dwell time is below the required minimum |
+        eventId:
+          type:
+            - string
+            - "null"
+          description: |
+            ID of the recorded analytics event.
+            - `POST /presence/validate`: non-null string when the event was recorded successfully.
+            - `POST /presence/check`: always `null` (no side effects).
+          example: "789"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+
+    ScopeErrorResponse:
+      type: object
+      required:
+        - error
+        - required
+      properties:
+        error:
+          type: string
+          enum:
+            - insufficient_scope
+          example: "insufficient_scope"
+        required:
+          type: string
+          description: The scope that was required but not present in the credential.
+          example: "presence:validate"
+
+    ValidationErrorResponse:
+      type: object
+      required:
+        - error
+        - details
+      properties:
+        error:
+          type: string
+          enum:
+            - Invalid request parameters
+          example: "Invalid request parameters"
+        details:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-field validation errors. Keys are the parameter names.
+          example:
+            latitude: "must be between -90 and 90"
+            session_id: "is required"
+
+    IdempotencyConflictResponse:
+      type: object
+      required:
+        - error
+        - retryAfter
+      properties:
+        error:
+          type: string
+          enum:
+            - Request in progress
+          example: "Request in progress"
+        retryAfter:
+          type: integer
+          description: Seconds to wait before retrying.
+          example: 30
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Invalid or missing API credentials"
+
+    ForbiddenValidate:
+      description: Valid credentials but missing the `presence:validate` scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ScopeErrorResponse'
+          example:
+            error: "insufficient_scope"
+            required: "presence:validate"
+
+    ForbiddenCheck:
+      description: Valid credentials but missing the `presence:check` scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ScopeErrorResponse'
+          example:
+            error: "insufficient_scope"
+            required: "presence:check"
+
+    LocationNotFound:
+      description: |
+        The `location_id` does not exist or does not belong to the organization
+        associated with the API credential.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Location not found"
+
+    IdempotencyConflict:
+      description: |
+        A request with the same `Idempotency-Key` is currently in flight.
+        Wait the number of seconds indicated by `retryAfter` before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IdempotencyConflictResponse'
+          example:
+            error: "Request in progress"
+            retryAfter: 30
+
+    UnprocessableEntity:
+      description: One or more request parameters failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+          example:
+            error: "Invalid request parameters"
+            details:
+              latitude: "is required"
+              session_id: "is required"
