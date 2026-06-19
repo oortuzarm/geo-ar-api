@@ -1,12 +1,15 @@
 openapi: 3.1.0
 
 info:
-  title: Ubyca Presence API
+  title: Ubyca API v1
   version: v1
   description: |
-    API para validar presencia geográfica y determinar si una ubicación cumple
-    las reglas configuradas de disponibilidad, geofencing, horario, cupos,
-    dwell y live visits.
+    API pública de Ubyca para integración con la plataforma de experiencias GPS.
+
+    Cubre dos áreas principales:
+
+    - **Projects & Locations** — Descubrir proyectos y ubicaciones (IDs requeridos para Presence).
+    - **Presence** — Validar presencia geográfica contra las reglas de disponibilidad configuradas.
 
     ## Autenticación
 
@@ -25,6 +28,17 @@ info:
 
     Las credenciales se crean y gestionan desde Studio.
 
+    ## Flujo de integración
+
+    Un integrador externo puede obtener el `location_id` requerido por Presence
+    directamente desde la API, sin acceder a Studio:
+
+    ```
+    GET /api/v1/projects                         → obtener project IDs
+    GET /api/v1/projects/{project_id}/locations  → obtener location IDs
+    POST /api/v1/presence/validate               → validar presencia
+    ```
+
 servers:
   - url: https://geo-ar-api.railway.app
     description: Production
@@ -32,6 +46,12 @@ servers:
     description: Development
 
 tags:
+  - name: Projects
+    description: Discover and list projects belonging to your organization.
+  - name: Locations
+    description: |
+      Discover locations (GeoPoints) within a project.
+      The `id` of each location is the `location_id` required by Presence API calls.
   - name: Presence
     description: Validate geographic presence against location availability rules.
 
@@ -40,6 +60,289 @@ security:
   - bearerPair: []
 
 paths:
+  # ── Projects ─────────────────────────────────────────────────────────────────
+
+  /api/v1/projects:
+    get:
+      tags:
+        - Projects
+      operationId: listProjects
+      summary: List projects
+      description: |
+        Returns all projects belonging to the organization associated with the
+        API credential, ordered by creation date descending.
+
+        Each project includes `locationCount` but not the individual location IDs.
+        To obtain location IDs, call `GET /api/v1/projects/{project_id}/locations`.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      responses:
+        "200":
+          description: List of projects returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+              example:
+                data:
+                  - id: "550e8400-e29b-41d4-a716-446655440000"
+                    title: "Circuito Histórico"
+                    subtitle: "Recorrido por el centro"
+                    description: "Visita los puntos históricos de la ciudad."
+                    status: "active"
+                    coverImage: null
+                    howToGet: null
+                    shareText: null
+                    communityEnabled: false
+                    locationCount: 3
+                    createdAt: "2026-06-01T10:00:00.000Z"
+                    updatedAt: "2026-06-15T12:30:00.000Z"
+                meta:
+                  count: 1
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenProjects'
+
+  /api/v1/projects/{id}:
+    get:
+      tags:
+        - Projects
+      operationId: getProject
+      summary: Get a project
+      description: |
+        Returns a single project by ID. The project must belong to the organization
+        associated with the API credential.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Project returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+              example:
+                data:
+                  id: "550e8400-e29b-41d4-a716-446655440000"
+                  title: "Circuito Histórico"
+                  subtitle: "Recorrido por el centro"
+                  description: "Visita los puntos históricos de la ciudad."
+                  status: "active"
+                  coverImage: null
+                  howToGet: null
+                  shareText: null
+                  communityEnabled: false
+                  locationCount: 3
+                  createdAt: "2026-06-01T10:00:00.000Z"
+                  updatedAt: "2026-06-15T12:30:00.000Z"
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenProjects'
+        "404":
+          $ref: '#/components/responses/ResourceNotFound'
+
+  # ── Locations ─────────────────────────────────────────────────────────────────
+
+  /api/v1/projects/{project_id}/locations:
+    get:
+      tags:
+        - Locations
+      operationId: listProjectLocations
+      summary: List locations for a project
+      description: |
+        Returns all locations (GeoPoints) belonging to the specified project,
+        ordered by their configured `order` field.
+
+        **The `id` field of each location is the value required as `location_id`
+        in Presence Check and Presence Validate calls.**
+
+        Each location includes its boundary configuration, schedule, quota, dwell
+        settings, and destination — all the information needed to understand the
+        validation rules before calling Presence.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: List of locations returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationListResponse'
+              examples:
+                with_radius:
+                  summary: Location with radius boundary
+                  value:
+                    data:
+                      - id: "660e8400-e29b-41d4-a716-446655440001"
+                        name: "Punto Central"
+                        description: "Acceso principal al recorrido."
+                        instructions: null
+                        active: true
+                        order: 0
+                        latitude: -33.4372
+                        longitude: -70.6506
+                        boundary:
+                          type: "radius"
+                          radiusMeters: 50
+                        schedule:
+                          enabled: false
+                          days: []
+                          startTime: null
+                          endTime: null
+                        quota:
+                          enabled: false
+                          limit: null
+                          used: 0
+                          remaining: null
+                        dwell:
+                          enabled: false
+                          seconds: 0
+                        destination:
+                          type: "url"
+                          url: "https://example.com/contenido"
+                        destinationCategory: "website"
+                        pointCategory: "tourism"
+                        createdAt: "2026-06-01T10:00:00.000Z"
+                    meta:
+                      count: 1
+                with_quota_and_schedule:
+                  summary: Location with quota and schedule enabled
+                  value:
+                    data:
+                      - id: "660e8400-e29b-41d4-a716-446655440002"
+                        name: "Punto Restringido"
+                        description: null
+                        instructions: "Solo disponible en horario de atención."
+                        active: true
+                        order: 1
+                        latitude: -33.4400
+                        longitude: -70.6520
+                        boundary:
+                          type: "radius"
+                          radiusMeters: 30
+                        schedule:
+                          enabled: true
+                          days: ["mon", "tue", "wed", "thu", "fri"]
+                          startTime: "09:00"
+                          endTime: "18:00"
+                        quota:
+                          enabled: true
+                          limit: 100
+                          used: 42
+                          remaining: 58
+                        dwell:
+                          enabled: true
+                          seconds: 60
+                        destination:
+                          type: "url"
+                          url: "https://example.com/oferta"
+                        destinationCategory: "coupon"
+                        pointCategory: "retail"
+                        createdAt: "2026-06-02T09:00:00.000Z"
+                    meta:
+                      count: 1
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenLocations'
+        "404":
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /api/v1/locations/{id}:
+    get:
+      tags:
+        - Locations
+      operationId: getLocation
+      summary: Get a single location
+      description: |
+        Returns a single location (GeoPoint) by ID. The location must belong to
+        a project within the organization associated with the API credential.
+
+        **The `id` returned is the value required as `location_id`
+        in Presence Check and Presence Validate calls.**
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the location.
+          example: "660e8400-e29b-41d4-a716-446655440001"
+      responses:
+        "200":
+          description: Location returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationResponse'
+              example:
+                data:
+                  id: "660e8400-e29b-41d4-a716-446655440001"
+                  name: "Punto Central"
+                  description: "Acceso principal al recorrido."
+                  instructions: null
+                  active: true
+                  order: 0
+                  latitude: -33.4372
+                  longitude: -70.6506
+                  boundary:
+                    type: "radius"
+                    radiusMeters: 50
+                  schedule:
+                    enabled: false
+                    days: []
+                    startTime: null
+                    endTime: null
+                  quota:
+                    enabled: false
+                    limit: null
+                    used: 0
+                    remaining: null
+                  dwell:
+                    enabled: false
+                    seconds: 0
+                  destination:
+                    type: "url"
+                    url: "https://example.com/contenido"
+                  destinationCategory: "website"
+                  pointCategory: "tourism"
+                  createdAt: "2026-06-01T10:00:00.000Z"
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenLocations'
+        "404":
+          $ref: '#/components/responses/ResourceNotFound'
+
+  # ── Presence ──────────────────────────────────────────────────────────────────
+
   /api/v1/presence/validate:
     post:
       tags:
@@ -71,7 +374,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PresenceRequest'
             example:
-              location_id: "42"
+              location_id: "660e8400-e29b-41d4-a716-446655440001"
               session_id: "session-abc-123"
               coordinates:
                 latitude: -33.4372
@@ -97,7 +400,7 @@ paths:
                   summary: All checks passed
                   value:
                     valid: true
-                    locationId: "42"
+                    locationId: "660e8400-e29b-41d4-a716-446655440001"
                     sessionId: "session-abc-123"
                     checks:
                       locationActive: true
@@ -115,12 +418,12 @@ paths:
                       type: "url"
                       url: "https://example.com/contenido"
                     failureReason: null
-                    eventId: "789"
+                    eventId: "770e8400-e29b-41d4-a716-446655440010"
                 outside_boundary:
                   summary: User outside boundary
                   value:
                     valid: false
-                    locationId: "42"
+                    locationId: "660e8400-e29b-41d4-a716-446655440001"
                     sessionId: "session-abc-123"
                     checks:
                       locationActive: true
@@ -129,12 +432,12 @@ paths:
                       distanceMeters: 312.4
                     destination: null
                     failureReason: "outside_boundary"
-                    eventId: "790"
+                    eventId: "770e8400-e29b-41d4-a716-446655440011"
                 quota_exhausted:
                   summary: Quota exhausted
                   value:
                     valid: false
-                    locationId: "42"
+                    locationId: "660e8400-e29b-41d4-a716-446655440001"
                     sessionId: "session-abc-123"
                     checks:
                       locationActive: true
@@ -146,12 +449,12 @@ paths:
                       quotaRemaining: 0
                     destination: null
                     failureReason: "quota_exhausted"
-                    eventId: "791"
+                    eventId: "770e8400-e29b-41d4-a716-446655440012"
                 dwell_not_met:
                   summary: Dwell time not met
                   value:
                     valid: false
-                    locationId: "42"
+                    locationId: "660e8400-e29b-41d4-a716-446655440001"
                     sessionId: "session-abc-123"
                     checks:
                       locationActive: true
@@ -167,12 +470,12 @@ paths:
                       dwellTimeMet: false
                     destination: null
                     failureReason: "dwell_time_not_met"
-                    eventId: "792"
+                    eventId: "770e8400-e29b-41d4-a716-446655440013"
                 minimum_live_visits:
                   summary: Not enough concurrent users
                   value:
                     valid: false
-                    locationId: "42"
+                    locationId: "660e8400-e29b-41d4-a716-446655440001"
                     sessionId: "session-abc-123"
                     checks:
                       locationActive: true
@@ -188,7 +491,7 @@ paths:
                       liveVisitsMet: false
                     destination: null
                     failureReason: "minimum_live_visits_not_reached"
-                    eventId: "793"
+                    eventId: "770e8400-e29b-41d4-a716-446655440014"
         "401":
           $ref: '#/components/responses/Unauthorized'
         "403":
@@ -227,7 +530,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PresenceRequest'
             example:
-              location_id: "42"
+              location_id: "660e8400-e29b-41d4-a716-446655440001"
               session_id: "session-abc-123"
               coordinates:
                 latitude: -33.4372
@@ -246,7 +549,7 @@ paths:
                   summary: All checks passed (dry-run)
                   value:
                     valid: true
-                    locationId: "42"
+                    locationId: "660e8400-e29b-41d4-a716-446655440001"
                     sessionId: "session-abc-123"
                     checks:
                       locationActive: true
@@ -269,7 +572,7 @@ paths:
                   summary: Outside operating schedule
                   value:
                     valid: false
-                    locationId: "42"
+                    locationId: "660e8400-e29b-41d4-a716-446655440001"
                     sessionId: "session-abc-123"
                     checks:
                       locationActive: true
@@ -320,6 +623,372 @@ components:
         in flight, a 409 is returned. Only supported on `POST /api/v1/presence/validate`.
 
   schemas:
+    # ── Shared ────────────────────────────────────────────────────────────────────
+
+    PaginationMeta:
+      type: object
+      required:
+        - count
+      properties:
+        count:
+          type: integer
+          description: Total number of items in the result set.
+          example: 3
+
+    # ── Project schemas ───────────────────────────────────────────────────────────
+
+    Project:
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - communityEnabled
+        - locationCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for this project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        title:
+          type: string
+          description: Title of the project.
+          example: "Circuito Histórico"
+        subtitle:
+          type:
+            - string
+            - "null"
+          description: Optional subtitle.
+          example: "Recorrido por el centro"
+        description:
+          type:
+            - string
+            - "null"
+          description: Optional description of the project.
+        status:
+          type: string
+          description: Publication status of the project (e.g. `active`, `draft`).
+          example: "active"
+        coverImage:
+          type:
+            - string
+            - "null"
+          description: URL or data URI of the cover image.
+        howToGet:
+          type:
+            - string
+            - "null"
+          description: Instructions on how to reach the project location.
+        shareText:
+          type:
+            - string
+            - "null"
+          description: Text used when sharing the project.
+        communityEnabled:
+          type: boolean
+          description: Whether the project is listed in the community showcase.
+        locationCount:
+          type: integer
+          description: Number of locations (GeoPoints) in this project.
+          example: 3
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 creation timestamp (millisecond precision).
+          example: "2026-06-01T10:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO 8601 last-updated timestamp (millisecond precision).
+          example: "2026-06-15T12:30:00.000Z"
+
+    ProjectListResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ProjectResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Project'
+
+    # ── Location sub-schemas ──────────────────────────────────────────────────────
+
+    LocationBoundaryRadius:
+      type: object
+      required:
+        - type
+        - radiusMeters
+      properties:
+        type:
+          type: string
+          enum:
+            - radius
+        radiusMeters:
+          type: integer
+          description: Radius of the circular boundary in meters.
+          example: 50
+
+    LocationBoundaryPolygon:
+      type: object
+      required:
+        - type
+        - polygon
+      properties:
+        type:
+          type: string
+          enum:
+            - polygon
+        polygon:
+          type: array
+          description: Array of [longitude, latitude] coordinate pairs defining the polygon.
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+
+    LocationBoundary:
+      description: |
+        Boundary configuration for the location. Shape depends on `type`:
+        - `radius`: circular boundary defined by `radiusMeters`.
+        - `polygon`: arbitrary polygon defined by a coordinate array.
+      oneOf:
+        - $ref: '#/components/schemas/LocationBoundaryRadius'
+        - $ref: '#/components/schemas/LocationBoundaryPolygon'
+      discriminator:
+        propertyName: type
+        mapping:
+          radius: '#/components/schemas/LocationBoundaryRadius'
+          polygon: '#/components/schemas/LocationBoundaryPolygon'
+
+    LocationSchedule:
+      type: object
+      required:
+        - enabled
+        - days
+      properties:
+        enabled:
+          type: boolean
+          description: Whether schedule restrictions are active for this location.
+        days:
+          type: array
+          items:
+            type: string
+          description: Day identifiers when the location is accessible (e.g. `["mon", "tue"]`).
+          example: ["mon", "tue", "wed", "thu", "fri"]
+        startTime:
+          type:
+            - string
+            - "null"
+          description: Daily start time in HH:MM format. `null` when schedule is disabled.
+          example: "09:00"
+        endTime:
+          type:
+            - string
+            - "null"
+          description: Daily end time in HH:MM format. `null` when schedule is disabled.
+          example: "18:00"
+
+    LocationQuota:
+      type: object
+      required:
+        - enabled
+        - used
+      properties:
+        enabled:
+          type: boolean
+          description: Whether quota restrictions are active for this location.
+        limit:
+          type:
+            - integer
+            - "null"
+          description: Total allowed validations. `null` when quota is disabled.
+          example: 100
+        used:
+          type: integer
+          description: Validations consumed so far.
+          example: 42
+        remaining:
+          type:
+            - integer
+            - "null"
+          description: Remaining validations (`limit - used`, floored at 0). `null` when quota is disabled.
+          example: 58
+
+    LocationDwell:
+      type: object
+      required:
+        - enabled
+        - seconds
+      properties:
+        enabled:
+          type: boolean
+          description: |
+            Whether dwell time is required before validation passes.
+            When `true`, the `dwell_elapsed_seconds` field becomes functionally
+            required in Presence API calls.
+        seconds:
+          type: integer
+          description: Minimum seconds the user must spend inside the boundary.
+          example: 60
+
+    LocationDestination:
+      type: object
+      required:
+        - type
+        - url
+      properties:
+        type:
+          type: string
+          enum:
+            - url
+          description: Destination type. Currently always `url`.
+        url:
+          type:
+            - string
+            - "null"
+          format: uri
+          description: |
+            URL to deliver to the user on successful presence validation.
+            `null` when no content is configured for this location.
+          example: "https://example.com/contenido"
+
+    # ── Location schema ───────────────────────────────────────────────────────────
+
+    Location:
+      type: object
+      required:
+        - id
+        - name
+        - active
+        - order
+        - latitude
+        - longitude
+        - boundary
+        - schedule
+        - quota
+        - dwell
+        - destination
+        - createdAt
+      description: |
+        A GeoPoint (location) within a project. Includes all configuration needed
+        to understand the validation rules that will apply when calling Presence.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: |
+            Unique identifier for this location.
+            **This is the value required as `location_id` in Presence Check and
+            Presence Validate calls.**
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        name:
+          type: string
+          description: Display name of the location.
+          example: "Punto Central"
+        description:
+          type:
+            - string
+            - "null"
+          description: Optional description of the location.
+        instructions:
+          type:
+            - string
+            - "null"
+          description: Optional instructions shown to end users at this location.
+        active:
+          type: boolean
+          description: |
+            Whether the location is active. Only active locations can pass
+            presence validation (`failureReason: location_inactive` otherwise).
+        order:
+          type: integer
+          description: Display order within the project (ascending).
+          example: 0
+        latitude:
+          type: number
+          format: float
+          description: Latitude of the location center in decimal degrees.
+          example: -33.4372
+        longitude:
+          type: number
+          format: float
+          description: Longitude of the location center in decimal degrees.
+          example: -70.6506
+        boundary:
+          $ref: '#/components/schemas/LocationBoundary'
+        schedule:
+          $ref: '#/components/schemas/LocationSchedule'
+        quota:
+          $ref: '#/components/schemas/LocationQuota'
+        dwell:
+          $ref: '#/components/schemas/LocationDwell'
+        destination:
+          $ref: '#/components/schemas/LocationDestination'
+        destinationCategory:
+          type:
+            - string
+            - "null"
+          description: |
+            Category of the destination URL. Present only for `url`-type locations.
+            Possible values: `website` | `whatsapp` | `form` | `reservation` |
+            `ecommerce` | `social` | `map` | `coupon` | `custom`.
+          example: "website"
+        pointCategory:
+          type:
+            - string
+            - "null"
+          description: |
+            Physical or functional category of the place.
+            Possible values: `gastronomy` | `retail` | `health` | `tourism` |
+            `culture` | `education` | `services` | `events` | `entertainment` |
+            `transport` | `accommodation` | `sport` | `real_estate` | `corporate` | `other`.
+          example: "tourism"
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 creation timestamp (millisecond precision).
+          example: "2026-06-01T10:00:00.000Z"
+
+    LocationListResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Location'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    LocationResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Location'
+
+    # ── Presence schemas ──────────────────────────────────────────────────────────
+
     Coordinates:
       type: object
       required:
@@ -371,9 +1040,11 @@ components:
         location_id:
           type: string
           description: |
-            Internal GeoPoint identifier. Integer database ID of the target location,
-            scoped to the organization associated with the API credential.
-          example: "42"
+            UUID of the target GeoPoint (Location), scoped to the organization
+            associated with the API credential. Obtain this value from
+            `GET /api/v1/projects/{project_id}/locations` or
+            `GET /api/v1/locations/{id}`.
+          example: "660e8400-e29b-41d4-a716-446655440001"
         session_id:
           type: string
           minLength: 1
@@ -388,7 +1059,7 @@ components:
           minimum: 0
           description: |
             Seconds the user has spent inside the area. Functionally required when the
-            location has `requires_dwell_time` enabled — omitting it produces
+            location has `dwell.enabled: true` — omitting it produces
             `failureReason: dwell_required`. Ignored for locations without dwell.
           example: 120
         timestamp:
@@ -410,7 +1081,7 @@ components:
 
         Conditional fields by feature:
         - `distanceMeters`: only present when `boundaryType` is `radius`.
-        - `quotaAvailable`, `quotaRemaining`: only present when quota is configured.
+        - `quotaAvailable`, `quotaRemaining`: only present when `quota.enabled` is `true`.
         - `liveVisitsRequired`, `liveVisitsCurrent`: only present when `liveVisitsEnabled` is `true`.
         - `dwellTimeMet`: only present when `dwellRequired` is `true`.
 
@@ -439,19 +1110,17 @@ components:
           description: Whether the location is within its configured operating schedule.
         quotaAvailable:
           type: boolean
-          description: Whether quota is available. Present only when the location has quota configured.
+          description: Whether quota is available. Present only when `quota.enabled` is `true`.
         quotaRemaining:
           type: integer
-          description: |
-            Validations remaining in the current quota. Present only when quota is configured.
+          description: Validations remaining in the current quota. Present only when quota is configured.
           example: 9
         liveVisitsEnabled:
           type: boolean
           description: Whether the live visits minimum is enforced for this location.
         liveVisitsRequired:
           type: integer
-          description: |
-            Minimum concurrent users required. Present only when `liveVisitsEnabled` is `true`.
+          description: Minimum concurrent users required. Present only when `liveVisitsEnabled` is `true`.
           example: 3
         liveVisitsCurrent:
           type: integer
@@ -508,8 +1177,9 @@ components:
             Both outcomes return HTTP 200 — this field determines the business result.
         locationId:
           type: string
-          description: ID of the evaluated GeoPoint.
-          example: "42"
+          format: uuid
+          description: UUID of the evaluated GeoPoint.
+          example: "660e8400-e29b-41d4-a716-446655440001"
         sessionId:
           type: string
           description: Session ID received in the request.
@@ -552,11 +1222,14 @@ components:
           type:
             - string
             - "null"
+          format: uuid
           description: |
-            ID of the recorded analytics event.
-            - `POST /presence/validate`: non-null string when the event was recorded successfully.
+            UUID of the recorded analytics event.
+            - `POST /presence/validate`: non-null UUID when the event was recorded successfully.
             - `POST /presence/check`: always `null` (no side effects).
-          example: "789"
+          example: "770e8400-e29b-41d4-a716-446655440010"
+
+    # ── Error schemas ─────────────────────────────────────────────────────────────
 
     ErrorResponse:
       type: object
@@ -620,6 +1293,8 @@ components:
           example: 30
 
   responses:
+    # ── Auth ──────────────────────────────────────────────────────────────────────
+
     Unauthorized:
       description: Missing or invalid API credentials.
       content:
@@ -628,6 +1303,28 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             error: "Invalid or missing API credentials"
+
+    # ── Scope errors (one per scope for accurate examples) ────────────────────────
+
+    ForbiddenProjects:
+      description: Valid credentials but missing the `projects:read` scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ScopeErrorResponse'
+          example:
+            error: "insufficient_scope"
+            required: "projects:read"
+
+    ForbiddenLocations:
+      description: Valid credentials but missing the `locations:read` scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ScopeErrorResponse'
+          example:
+            error: "insufficient_scope"
+            required: "locations:read"
 
     ForbiddenValidate:
       description: Valid credentials but missing the `presence:validate` scope.
@@ -649,6 +1346,19 @@ components:
             error: "insufficient_scope"
             required: "presence:check"
 
+    # ── Not found ─────────────────────────────────────────────────────────────────
+
+    ResourceNotFound:
+      description: |
+        The requested resource does not exist or does not belong to the organization
+        associated with the API credential.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Resource not found"
+
     LocationNotFound:
       description: |
         The `location_id` does not exist or does not belong to the organization
@@ -659,6 +1369,8 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             error: "Location not found"
+
+    # ── Presence-specific ─────────────────────────────────────────────────────────
 
     IdempotencyConflict:
       description: |
