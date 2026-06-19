@@ -175,10 +175,8 @@ module Api
 
         lat  = params[:latitude].to_f
         lng  = params[:longitude].to_f
-        dist = GeoEngine.distance_to(@point, lat, lng)
 
-        # Generous tolerance (+20 m) for GPS drift at timer completion.
-        unless dist <= @point.activation_radius + 20
+        unless GeoEngine.inside_boundary?(@point, lat, lng)
           return render json: { unlocked: false, message: "Saliste del área antes de completar el tiempo." },
                         status: :unprocessable_entity
         end
