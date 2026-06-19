@@ -77,8 +77,6 @@ module Api
       from = parse_date_param(:from)
       to   = parse_date_param(:to)
 
-      active_points = @project.geo_points.where(active: true).to_a
-
       scope = AnalyticsEvent
         .where(geo_project_id: @project.id, event_type: "project_location")
         .where.not(latitude: nil, longitude: nil)
@@ -88,29 +86,19 @@ module Api
       scope = scope.where(event_date: from..) if from
       scope = scope.where(event_date: ..to)   if to
 
-      rows = scope.pluck(:session_id, :latitude, :longitude, :event_date)
-
-      by_session = rows.group_by { |sid, _lat, _lng, _date| sid }
+      rows       = scope.pluck(:session_id, :had_inside_position, :had_outside_position, :latitude, :longitude, :event_date)
+      by_session = rows.group_by { |sid, _hi, _ho, _lat, _lng, _date| sid }
 
       positions = []
 
       by_session.each do |_session_id, session_rows|
-        has_inside  = false
-        has_outside = false
+        ever_inside  = session_rows.any? { |_sid, had_inside, _had_outside, _lat, _lng, _date| had_inside }
+        ever_outside = session_rows.any? { |_sid, _had_inside, had_outside, _lat, _lng, _date| had_outside }
 
-        session_rows.each do |_sid, lat, lng, _date|
-          if active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
-            has_inside = true
-          else
-            has_outside = true
-          end
-          break if has_inside && has_outside
-        end
+        next unless ever_inside && !ever_outside
 
-        next unless has_inside && !has_outside
-
-        last_row = session_rows.max_by { |_sid, _lat, _lng, date| date }
-        positions << { lat: last_row[1], lng: last_row[2] }
+        last_row = session_rows.max_by { |_sid, _hi, _ho, _lat, _lng, date| date }
+        positions << { lat: last_row[3], lng: last_row[4] }
       end
 
       render json: { positions: positions }
@@ -178,8 +166,6 @@ module Api
       from = parse_date_param(:from)
       to   = parse_date_param(:to)
 
-      active_points = @project.geo_points.where(active: true).to_a
-
       scope = AnalyticsEvent
         .where(geo_project_id: @project.id, event_type: "project_location")
         .where.not(latitude: nil, longitude: nil)
@@ -189,23 +175,19 @@ module Api
       scope = scope.where(event_date: from..) if from
       scope = scope.where(event_date: ..to)   if to
 
-      rows = scope.pluck(:session_id, :latitude, :longitude, :event_date)
-
-      by_session = rows.group_by { |sid, _lat, _lng, _date| sid }
+      rows       = scope.pluck(:session_id, :had_inside_position, :had_outside_position, :latitude, :longitude, :event_date)
+      by_session = rows.group_by { |sid, _hi, _ho, _lat, _lng, _date| sid }
 
       positions = []
 
       by_session.each do |_session_id, session_rows|
-        coords = session_rows.map { |_sid, lat, lng, _date| [lat, lng] }
+        ever_inside  = session_rows.any? { |_sid, had_inside, _had_outside, _lat, _lng, _date| had_inside }
+        ever_outside = session_rows.any? { |_sid, _had_inside, had_outside, _lat, _lng, _date| had_outside }
 
-        was_inside = coords.any? { |lat, lng|
-          active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
-        }
+        next if ever_inside || !ever_outside
 
-        next if was_inside
-
-        last_row = session_rows.max_by { |_sid, _lat, _lng, date| date }
-        positions << { lat: last_row[1], lng: last_row[2] }
+        last_row = session_rows.max_by { |_sid, _hi, _ho, _lat, _lng, date| date }
+        positions << { lat: last_row[3], lng: last_row[4] }
       end
 
       render json: { positions: positions }
@@ -252,29 +234,25 @@ module Api
       [ live_inside, live_outside, 0, live_total ]
     end
 
-    # Returns [inside, outside, total] unique-person counts for the requested
-    # date range, using the same geospatial criterion as three_way_live_counts
-    # and ActivityOutsideAreasService.
+    # Returns [inside, outside, mixed, total] unique-session counts for the
+    # requested date range.
     #
-    # Only project_location events are used as the coordinate source because
-    # they are the only event type that records a user's general position
-    # regardless of zone membership.  Events like radius_enter or point_click
-    # are only fired while already inside a boundary, so including them would
-    # inflate inside_sessions and prevent outside-only sessions from appearing
-    # in outside_sessions.  This also aligns the historical source with
-    # ActivityOutsideAreasService#historical_coordinates.
+    # Source of truth: had_inside_position / had_outside_position flags written
+    # at ping time in record_daily_event. No GeoEngine call at query time.
+    #
+    # Flags are accumulated across all days in the range via OR so that a session
+    # with inside activity on one day and outside activity on another is correctly
+    # classified as mixed for the period.
     #
     # Classification:
-    #   inside          = sessions with ≥1 coordinate inside any active GeoPoint boundary.
-    #   outside         = sessions that never entered any active GeoPoint boundary (disjoint from inside).
-    #   mixed           = sessions with coordinates both inside and outside active boundaries.
-    #   total           = all sessions detected during the period.
-    #   total           = inside + outside  (sets are disjoint by construction).
+    #   inside_only  = had_inside=true,  had_outside=false (never left any boundary)
+    #   outside_only = had_inside=false, had_outside=true  (never entered any boundary)
+    #   mixed        = had_inside=true,  had_outside=true  (crossed at least once)
+    #   total        = all unique sessions detected in the period.
+    #   inside_only + outside_only + mixed = total
     def period_people_counts
       from = parse_date_param(:from)
       to   = parse_date_param(:to)
-
-      active_points = @project.geo_points.where(active: true).to_a
 
       scope = AnalyticsEvent
         .where(geo_project_id: @project.id, event_type: "project_location")
@@ -285,37 +263,27 @@ module Api
       scope = scope.where(event_date: from..) if from
       scope = scope.where(event_date: ..to)   if to
 
-      rows = scope.pluck(:session_id, :latitude, :longitude)
+      rows = scope.pluck(:session_id, :had_inside_position, :had_outside_position)
 
-      # Group all event coordinates by session_id, then classify each session.
-      coords_by_session = rows
-        .group_by { |sid, _lat, _lng| sid }
-        .transform_values { |r| r.map { |_sid, lat, lng| [lat, lng] } }
-
-      inside_sessions = Set.new
-      mixed_sessions  = Set.new
-
-      coords_by_session.each do |session_id, coords|
-        has_inside  = false
-        has_outside = false
-
-        coords.each do |lat, lng|
-          if active_points.any? { |pt| GeoEngine.inside_boundary?(pt, lat, lng) }
-            has_inside = true
-          else
-            has_outside = true
-          end
-          break if has_inside && has_outside
-        end
-
-        inside_sessions << session_id if has_inside
-        mixed_sessions  << session_id if has_inside && has_outside
+      # Accumulate flags per session across all days in the range.
+      flags_by_session = {}
+      rows.each do |session_id, had_inside, had_outside|
+        entry = flags_by_session[session_id] ||= [false, false]
+        entry[0] |= had_inside
+        entry[1] |= had_outside
       end
 
-      all_sessions     = Set.new(coords_by_session.keys)
-      outside_sessions = all_sessions - inside_sessions
+      inside_count  = 0
+      outside_count = 0
+      mixed_count   = 0
 
-      [ inside_sessions.size, outside_sessions.size, mixed_sessions.size, all_sessions.size ]
+      flags_by_session.each_value do |had_inside, had_outside|
+        inside_count  += 1 if had_inside
+        outside_count += 1 unless had_inside
+        mixed_count   += 1 if had_inside && had_outside
+      end
+
+      [ inside_count, outside_count, mixed_count, flags_by_session.size ]
     end
 
     def parse_date_param(key)

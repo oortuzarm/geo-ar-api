@@ -66,6 +66,7 @@ module Api
       def historical_coordinates
         scope = AnalyticsEvent
           .where(geo_project_id: @project.id, event_type: "project_location")
+          .where(had_outside_position: true)
           .where.not(latitude: nil, longitude: nil)
           .where(latitude: -90.0..90.0, longitude: -180.0..180.0)
           .where("NOT (latitude = 0 AND longitude = 0)")
