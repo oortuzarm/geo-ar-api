@@ -92,9 +92,15 @@ class Api::Analytics::OutsideAreasControllerTest < ActionDispatch::IntegrationTe
 
   test "excludes GPS events inside active GeoPoints" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "inside-active",
-      event_date: Date.today, latitude: -34.0, longitude: -58.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "inside-active",
+      event_date:           Date.today,
+      latitude:             -34.0,
+      longitude:            -58.0,
+      source:               "public",
+      had_inside_position:  true,
+      had_outside_position: false
     )
 
     get "/api/analytics/outside_areas?project_id=#{@project.id}"
@@ -106,9 +112,15 @@ class Api::Analytics::OutsideAreasControllerTest < ActionDispatch::IntegrationTe
 
   test "includes GPS events outside all active GeoPoints" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "outside-all",
-      event_date: Date.today, latitude: -35.0, longitude: -59.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "outside-all",
+      event_date:           Date.today,
+      latitude:             -35.0,
+      longitude:            -59.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
 
     get "/api/analytics/outside_areas?project_id=#{@project.id}"
@@ -128,9 +140,15 @@ class Api::Analytics::OutsideAreasControllerTest < ActionDispatch::IntegrationTe
     @active_point.update!(active: false)
 
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "inside-inactive",
-      event_date: Date.today, latitude: -34.0, longitude: -58.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "inside-inactive",
+      event_date:           Date.today,
+      latitude:             -34.0,
+      longitude:            -58.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
 
     get "/api/analytics/outside_areas?project_id=#{@project.id}"
@@ -144,14 +162,26 @@ class Api::Analytics::OutsideAreasControllerTest < ActionDispatch::IntegrationTe
 
   test "filters by start_date" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "old",
-      event_date: Date.new(2025, 1, 1), latitude: -35.0, longitude: -59.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "old",
+      event_date:           Date.new(2025, 1, 1),
+      latitude:             -35.0,
+      longitude:            -59.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "recent",
-      event_date: Date.today, latitude: -35.0, longitude: -59.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "recent",
+      event_date:           Date.today,
+      latitude:             -35.0,
+      longitude:            -59.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
 
     get "/api/analytics/outside_areas?project_id=#{@project.id}&start_date=#{Date.today}"
@@ -161,14 +191,26 @@ class Api::Analytics::OutsideAreasControllerTest < ActionDispatch::IntegrationTe
 
   test "filters by end_date" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "old2",
-      event_date: Date.new(2025, 1, 1), latitude: -35.0, longitude: -59.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "old2",
+      event_date:           Date.new(2025, 1, 1),
+      latitude:             -35.0,
+      longitude:            -59.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "recent2",
-      event_date: Date.today, latitude: -35.0, longitude: -59.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "recent2",
+      event_date:           Date.today,
+      latitude:             -35.0,
+      longitude:            -59.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
 
     get "/api/analytics/outside_areas?project_id=#{@project.id}&end_date=2025-12-31"
@@ -178,9 +220,15 @@ class Api::Analytics::OutsideAreasControllerTest < ActionDispatch::IntegrationTe
 
   test "ignores malformed date params" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "any",
-      event_date: Date.today, latitude: -35.0, longitude: -59.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "any",
+      event_date:           Date.today,
+      latitude:             -35.0,
+      longitude:            -59.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
 
     get "/api/analytics/outside_areas?project_id=#{@project.id}&start_date=not-a-date"

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_17_000001) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_19_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -34,6 +34,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_17_000001) do
     t.jsonb "context_metadata"
     t.string "failure_reason"
     t.uuid "smart_proxy_id"
+    t.boolean "had_inside_position", default: false, null: false
+    t.boolean "had_outside_position", default: false, null: false
     t.index ["api_credential_id"], name: "index_analytics_events_on_api_credential_id"
     t.index ["geo_project_id", "geo_point_id", "event_type", "session_id", "event_date"], name: "idx_analytics_events_radius_enter_uniqueness", unique: true, where: "((event_type)::text = 'radius_enter'::text)"
     t.index ["geo_project_id", "session_id", "event_date"], name: "idx_analytics_events_project_location_uniqueness", unique: true, where: "((event_type)::text = 'project_location'::text)"

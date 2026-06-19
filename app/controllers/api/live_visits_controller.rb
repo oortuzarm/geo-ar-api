@@ -245,11 +245,12 @@ module Api
     # classified as mixed for the period.
     #
     # Classification:
-    #   inside_only  = had_inside=true,  had_outside=false (never left any boundary)
-    #   outside_only = had_inside=false, had_outside=true  (never entered any boundary)
-    #   mixed        = had_inside=true,  had_outside=true  (crossed at least once)
-    #   total        = all unique sessions detected in the period.
-    #   inside_only + outside_only + mixed = total
+    #   inside_count  = had_inside=true  (inside_only + mixed — ever entered a boundary)
+    #   outside_count = had_inside=false (never entered any boundary)
+    #   mixed_count   = had_inside=true, had_outside=true (crossed at least once)
+    #   total         = all unique sessions detected in the period.
+    #   inside_count + outside_count = total
+    #   (mixed sessions are counted in inside_count, not in outside_count)
     def period_people_counts
       from = parse_date_param(:from)
       to   = parse_date_param(:to)

@@ -39,27 +39,27 @@ class Api::V1::ActivityOutsideAreasServiceTest < ActiveSupport::TestCase
 
   # ── Helpers ────────────────────────────────────────────────────────────────────
 
-  def make_event(lat, lng, date: Date.today)
+  def make_event(lat, lng, date: Date.today, had_inside: false, had_outside: true)
     AnalyticsEvent.create!(
-      geo_project: @project,
-      geo_point:   @active_point,
-      event_type:  "radius_enter",
-      session_id:  SecureRandom.hex(8),
-      event_date:  date,
-      latitude:    lat,
-      longitude:   lng
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           SecureRandom.hex(8),
+      event_date:           date,
+      latitude:             lat,
+      longitude:            lng,
+      source:               "public",
+      had_inside_position:  had_inside,
+      had_outside_position: had_outside
     )
   end
 
-  def make_live_visit(lat, lng, geo_point: @active_point)
-    GeoPointLiveVisit.create!(
-      geo_project:   @project,
-      geo_point:     geo_point,
-      session_id:    SecureRandom.hex(8),
-      lat:           lat,
-      lng:           lng,
-      inside_radius: true,
-      last_seen_at:  Time.current
+  def make_live_visit(lat, lng, last_seen_at: Time.current)
+    ProjectLiveVisit.create!(
+      geo_project:  @project,
+      session_id:   SecureRandom.hex(8),
+      lat:          lat,
+      lng:          lng,
+      last_seen_at: last_seen_at
     )
   end
 
@@ -79,7 +79,7 @@ class Api::V1::ActivityOutsideAreasServiceTest < ActiveSupport::TestCase
   # ── Case 1: GeoPoint A active, event inside A → exclude ───────────────────────
 
   test "excludes event inside an active GeoPoint (Case 1)" do
-    make_event(-34.0, -58.0)   # exact centre of @active_point (active, 50 m)
+    make_event(-34.0, -58.0, had_inside: true, had_outside: false)   # exact centre of @active_point (active, 50 m)
     result = call_service
     assert_equal 0, result.outside_points,
       "expected no outside events when GPS falls inside the only active GeoPoint"
@@ -101,7 +101,7 @@ class Api::V1::ActivityOutsideAreasServiceTest < ActiveSupport::TestCase
 
   test "excludes event when at least one active GeoPoint contains it (Case 3)" do
     # Both @active_point (active) and @inactive_point (inactive) are at (-34.0, -58.0).
-    make_event(-34.0, -58.0)   # inside both
+    make_event(-34.0, -58.0, had_inside: true, had_outside: false)   # inside both
     result = call_service
     assert_equal 0, result.outside_points,
       "expected exclusion because the active GeoPoint covers the coordinate"
@@ -127,7 +127,9 @@ class Api::V1::ActivityOutsideAreasServiceTest < ActiveSupport::TestCase
   end
 
   test "mixes inside and outside events correctly" do
-    make_event(-34.0, -58.0)   # inside active GeoPoint → excluded
+    # Mixed session: had outside activity but last coord landed inside. Passes
+    # had_outside_position pre-filter; GeoEngine post-filter excludes the coordinate.
+    make_event(-34.0, -58.0, had_inside: true, had_outside: true)
     make_event(-35.0, -59.0)   # outside all → included
 
     result = call_service
@@ -145,18 +147,26 @@ class Api::V1::ActivityOutsideAreasServiceTest < ActiveSupport::TestCase
 
   test "ignores events with nil coordinates" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "nil-coord",
-      event_date: Date.today, latitude: nil, longitude: nil
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "nil-coord",
+      event_date:           Date.today,
+      latitude:             nil,
+      longitude:            nil,
+      had_outside_position: true
     )
     assert_equal 0, call_service.total_points
   end
 
   test "ignores null-island coordinates (0, 0)" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @active_point,
-      event_type: "radius_enter", session_id: "null-island",
-      event_date: Date.today, latitude: 0, longitude: 0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "null-island",
+      event_date:           Date.today,
+      latitude:             0,
+      longitude:            0,
+      had_outside_position: true
     )
     assert_equal 0, call_service.total_points
   end
@@ -186,14 +196,12 @@ class Api::V1::ActivityOutsideAreasServiceTest < ActiveSupport::TestCase
   end
 
   test "live: only counts active_now sessions" do
-    GeoPointLiveVisit.create!(
-      geo_project:   @project,
-      geo_point:     @active_point,
-      session_id:    "stale-session",
-      lat:           -35.0,
-      lng:           -59.0,
-      inside_radius: false,
-      last_seen_at:  2.minutes.ago   # outside ACTIVE_WINDOW (45 s)
+    ProjectLiveVisit.create!(
+      geo_project:  @project,
+      session_id:   "stale-session",
+      lat:          -35.0,
+      lng:          -59.0,
+      last_seen_at: 2.minutes.ago   # outside ACTIVE_WINDOW (45 s)
     )
     result = call_service(mode: :live)
     assert_equal 0, result.total_points

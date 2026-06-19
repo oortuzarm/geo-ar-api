@@ -284,9 +284,15 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
     # Both setup events for point_a (-34.0, -58.0) have nil lat/lng —
     # add an event with GPS that falls inside point_a (active, default 50 m radius).
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @point_a,
-      event_type: "radius_enter", session_id: "inside-active",
-      event_date: Date.today, latitude: -34.0, longitude: -58.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "inside-active",
+      event_date:           Date.today,
+      latitude:             -34.0,
+      longitude:            -58.0,
+      source:               "public",
+      had_inside_position:  true,
+      had_outside_position: false
     )
 
     get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header
@@ -299,9 +305,15 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
 
   test "outside_areas: includes GPS events outside all active GeoPoints" do
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @point_a,
-      event_type: "radius_enter", session_id: "outside-all",
-      event_date: Date.today, latitude: -35.0, longitude: -59.0  # far away
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "outside-all",
+      event_date:           Date.today,
+      latitude:             -35.0,
+      longitude:            -59.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
 
     get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header
@@ -323,9 +335,15 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
     @point_b.update!(active: false)
 
     AnalyticsEvent.create!(
-      geo_project: @project, geo_point: @point_a,
-      event_type: "radius_enter", session_id: "inside-inactive",
-      event_date: Date.today, latitude: -34.0, longitude: -58.0
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           "inside-inactive",
+      event_date:           Date.today,
+      latitude:             -34.0,
+      longitude:            -58.0,
+      source:               "public",
+      had_inside_position:  false,
+      had_outside_position: true
     )
 
     get "/api/v1/projects/#{@project.id}/analytics/outside_areas", headers: auth_header

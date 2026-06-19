@@ -204,7 +204,8 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
     body = response.parsed_body
     assert body.key?("periodPeopleInsideAreas"),  "missing periodPeopleInsideAreas"
     assert body.key?("periodPeopleOutsideAreas"), "missing periodPeopleOutsideAreas"
-    assert body.key?("periodPeopleTotal"),        "missing periodPeopleTotal"
+    assert body.key?("periodPeopleMixed"),         "missing periodPeopleMixed"
+    assert body.key?("periodPeopleTotal"),         "missing periodPeopleTotal"
   end
 
   test "period without activity returns 0 for all three period metrics" do
@@ -217,7 +218,7 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "unique person inside active area counts in period inside" do
-    create_analytics_event("p-inside", INSIDE_LAT, INSIDE_LNG, Date.today)
+    create_analytics_event("p-inside", Date.today, had_inside: true, had_outside: false)
 
     get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
     assert_response :ok
@@ -228,7 +229,7 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "unique person outside active areas counts in period outside" do
-    create_analytics_event("p-outside", OUTSIDE_LAT, OUTSIDE_LNG, Date.today)
+    create_analytics_event("p-outside", Date.today, had_inside: false, had_outside: true)
 
     get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
     assert_response :ok
@@ -238,29 +239,29 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, body["periodPeopleTotal"]
   end
 
-  # Person A: events inside AND outside.  Person B: only outside.
-  # Expected: inside=1, outside=2, total=2 (union, not sum).
-  test "person present in both groups counted in each, total is union not sum" do
-    create_analytics_event("p-both", INSIDE_LAT,  INSIDE_LNG,  Date.today, geo_point: @active_point)
-    create_analytics_event("p-both", OUTSIDE_LAT, OUTSIDE_LNG, Date.today, geo_point: @inactive_point)
-    create_analytics_event("p-only-outside", OUTSIDE_LAT, OUTSIDE_LNG, Date.today, geo_point: @inactive_point)
+  # Person A (p-both): went inside AND outside — mixed. Counted in periodPeopleInsideAreas
+  # and periodPeopleMixed, but NOT in periodPeopleOutsideAreas (inside_count partitions
+  # on had_inside=true; mixed sessions always land in inside_count).
+  # Person B (p-only-outside): only ever outside. Counted only in periodPeopleOutsideAreas.
+  # Total is the union of unique sessions — each session counted once.
+  test "mixed session counted in inside and mixed but not in outside" do
+    create_analytics_event("p-both",         Date.today, had_inside: true,  had_outside: true)
+    create_analytics_event("p-only-outside", Date.today, had_inside: false, had_outside: true)
 
     get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
     assert_response :ok
     body = response.parsed_body
 
-    assert_equal 1, body["periodPeopleInsideAreas"]
-    assert_equal 2, body["periodPeopleOutsideAreas"]
-    assert_equal 2, body["periodPeopleTotal"],
-      "total must be the union — p-both counted once despite being in both groups"
+    assert_equal 1, body["periodPeopleInsideAreas"],  "mixed session counts as inside"
+    assert_equal 1, body["periodPeopleOutsideAreas"], "mixed session must NOT count as outside"
+    assert_equal 1, body["periodPeopleMixed"],         "mixed session counted in mixed"
+    assert_equal 2, body["periodPeopleTotal"],          "total is union of unique sessions"
   end
 
   test "inactive area does not count as active area for period classification" do
-    # Coords at @inactive_point centre — ~780 km from @active_point (50 m radius)
-    # → GeoEngine.inside_boundary? returns false for all ACTIVE points
-    create_analytics_event("p-inactive-area",
-                           @inactive_point.latitude, @inactive_point.longitude,
-                           Date.today, geo_point: @inactive_point)
+    # had_inside_position: false represents that the session never entered any ACTIVE
+    # GeoPoint boundary — regardless of whether it was inside an inactive point's area.
+    create_analytics_event("p-inactive-area", Date.today, had_inside: false, had_outside: true)
 
     get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
     assert_response :ok
@@ -275,8 +276,8 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
     yesterday = Date.today - 1
     today     = Date.today
 
-    create_analytics_event("p-yesterday", INSIDE_LAT, INSIDE_LNG, yesterday)
-    create_analytics_event("p-today",     INSIDE_LAT, INSIDE_LNG, today)
+    create_analytics_event("p-yesterday", yesterday, had_inside: true, had_outside: false)
+    create_analytics_event("p-today",     today,     had_inside: true, had_outside: false)
 
     get "/api/geo_projects/#{@project.id}/live_visits?from=#{yesterday}&to=#{yesterday}", as: :json
     assert_equal 1, response.parsed_body["periodPeopleInsideAreas"],
@@ -294,8 +295,8 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
   # When sessions have no overlap (each in exactly one group),
   # total must equal inside + outside — consistent with the outside-areas logic.
   test "period metrics are consistent with outside areas spatial logic" do
-    create_analytics_event("p-cons-inside",  INSIDE_LAT,  INSIDE_LNG,  Date.today)
-    create_analytics_event("p-cons-outside", OUTSIDE_LAT, OUTSIDE_LNG, Date.today)
+    create_analytics_event("p-cons-inside",  Date.today, had_inside: true,  had_outside: false)
+    create_analytics_event("p-cons-outside", Date.today, had_inside: false, had_outside: true)
 
     get "/api/geo_projects/#{@project.id}/live_visits?from=#{Date.today}&to=#{Date.today}", as: :json
     assert_response :ok
@@ -310,15 +311,17 @@ class Api::LiveVisitsControllerTest < ActionDispatch::IntegrationTest
 
   private
 
-  def create_analytics_event(session_id, lat, lng, date, geo_point: nil)
+  def create_analytics_event(session_id, date, had_inside:, had_outside:, lat: INSIDE_LAT, lng: INSIDE_LNG)
     AnalyticsEvent.create!(
-      geo_project: @project,
-      geo_point:   geo_point || @active_point,
-      event_type:  "radius_enter",
-      session_id:  session_id,
-      event_date:  date,
-      latitude:    lat,
-      longitude:   lng
+      geo_project:          @project,
+      event_type:           "project_location",
+      session_id:           session_id,
+      event_date:           date,
+      latitude:             lat,
+      longitude:            lng,
+      source:               "public",
+      had_inside_position:  had_inside,
+      had_outside_position: had_outside
     )
   end
 
