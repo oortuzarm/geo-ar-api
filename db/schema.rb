@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_06_11_000001) do
+ActiveRecord::Schema[7.2].define(version: 2026_06_17_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -121,6 +121,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_11_000001) do
     t.float "point_logo_position_y"
     t.string "point_video_url"
     t.string "point_video_type"
+    t.string "point_mode", default: "unlock", null: false
+    t.jsonb "social_links", default: {}
+    t.string "point_category"
+    t.boolean "featured", default: false, null: false
     t.index ["activation_mode"], name: "index_geo_points_on_activation_mode"
     t.index ["geo_project_id", "order"], name: "index_geo_points_on_geo_project_id_and_order"
     t.index ["geo_project_id"], name: "index_geo_points_on_geo_project_id"
@@ -284,6 +288,15 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_11_000001) do
     t.index ["token_digest"], name: "index_invitations_on_token_digest", unique: true
   end
 
+  create_table "live_visit_snapshots", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "geo_project_id", null: false
+    t.uuid "geo_point_id"
+    t.integer "active_count", null: false
+    t.datetime "sampled_at", null: false
+    t.index ["geo_project_id", "geo_point_id", "sampled_at"], name: "idx_live_visit_snapshots_lookup"
+    t.index ["sampled_at"], name: "idx_live_visit_snapshots_cleanup"
+  end
+
   create_table "memberships", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "user_id", null: false
     t.uuid "organization_id", null: false
@@ -393,34 +406,6 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_11_000001) do
     t.index ["key"], name: "index_site_configs_on_key", unique: true
   end
 
-  create_table "smart_link_geo_points", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.uuid "smart_link_id", null: false
-    t.uuid "geo_point_id", null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["geo_point_id"], name: "index_smart_link_geo_points_on_geo_point_id"
-    t.index ["smart_link_id", "geo_point_id"], name: "index_smart_link_geo_points_on_smart_link_id_and_geo_point_id", unique: true
-  end
-
-  create_table "smart_links", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.uuid "user_id", null: false
-    t.uuid "project_id", null: false
-    t.string "name", null: false
-    t.string "slug", null: false
-    t.string "scope_type", default: "project", null: false
-    t.string "destination_type", default: "external_url", null: false
-    t.string "destination_url"
-    t.string "status", default: "active", null: false
-    t.jsonb "ui_config", default: {}, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.uuid "organization_id", null: false
-    t.index ["organization_id", "slug"], name: "index_smart_links_on_organization_id_and_slug", unique: true
-    t.index ["project_id"], name: "index_smart_links_on_project_id"
-    t.index ["status"], name: "index_smart_links_on_status"
-    t.index ["user_id"], name: "index_smart_links_on_user_id"
-  end
-
   create_table "smart_proxies", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "organization_id", null: false
     t.uuid "user_id", null: false
@@ -499,6 +484,9 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_11_000001) do
     t.integer "onboarding_org_size_id"
     t.integer "onboarding_objective_id"
     t.string "time_zone", default: "UTC", null: false
+    t.string "email_verification_code"
+    t.datetime "email_verification_sent_at"
+    t.datetime "email_confirmed_at"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["plan_id"], name: "index_users_on_plan_id"
     t.index ["subscription_status"], name: "index_users_on_subscription_status"
@@ -522,11 +510,6 @@ ActiveRecord::Schema[7.2].define(version: 2026_06_11_000001) do
   add_foreign_key "memberships", "organizations"
   add_foreign_key "memberships", "users"
   add_foreign_key "password_reset_tokens", "users"
-  add_foreign_key "smart_link_geo_points", "geo_points"
-  add_foreign_key "smart_link_geo_points", "smart_links"
-  add_foreign_key "smart_links", "geo_projects", column: "project_id"
-  add_foreign_key "smart_links", "organizations"
-  add_foreign_key "smart_links", "users"
   add_foreign_key "smart_proxies", "organizations"
   add_foreign_key "smart_proxies", "users"
   add_foreign_key "smart_proxy_live_visits", "smart_proxies"

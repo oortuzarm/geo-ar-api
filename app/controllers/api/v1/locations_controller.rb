@@ -1,6 +1,7 @@
 module Api
   module V1
     class LocationsController < BaseController
+      before_action -> { require_scope!("locations:read") }
       before_action :set_project, only: %i[index]
 
       def index

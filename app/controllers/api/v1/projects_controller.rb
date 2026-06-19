@@ -1,6 +1,8 @@
 module Api
   module V1
     class ProjectsController < BaseController
+      before_action -> { require_scope!("projects:read") }
+
       def index
         projects = organization_projects
           .includes(:geo_points)

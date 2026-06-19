@@ -36,6 +36,10 @@ Rails.application.routes.draw do
         post :validate
         post :check
       end
+
+      match "*path",
+            to:  proc { [404, { "Content-Type" => "application/json" }, ['{"error":"Not found"}']] },
+            via: :all
     end
   end
 
