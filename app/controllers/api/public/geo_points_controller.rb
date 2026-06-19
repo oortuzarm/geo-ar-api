@@ -183,7 +183,17 @@ module Api
                         status: :unprocessable_entity
         end
 
+        # started_at is required when the point has a configured dwell time.
+        # Rejecting 0 / blank prevents bypassing the time check by omitting the param.
         started_at = params[:started_at].to_i
+        if @point.dwell_time_seconds.to_i > 0 && started_at <= 0
+          return render json: {
+            unlocked: false,
+            reason:   "dwell_time_required",
+            message:  "Debes completar el tiempo de permanencia requerido."
+          }, status: :unprocessable_entity
+        end
+
         if started_at > 0
           elapsed = Time.current.to_i - started_at
           unless elapsed >= @point.dwell_time_seconds
