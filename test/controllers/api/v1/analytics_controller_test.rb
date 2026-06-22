@@ -248,6 +248,33 @@ class Api::V1::AnalyticsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 2, pt_a["entryCount"]
   end
 
+  test "intensity: location with only conversion events appears with entryCount 0" do
+    point_c = GeoPoint.create!(
+      geo_project: @project,
+      name:        "Click Only",
+      latitude:    -34.2,
+      longitude:   -58.2,
+      order:       2
+    )
+    AnalyticsEvent.create!(
+      geo_project: @project,
+      geo_point:   point_c,
+      event_type:  "point_click",
+      session_id:  "click-only-sess",
+      event_date:  Date.today
+    )
+
+    get "/api/v1/projects/#{@project.id}/analytics/intensity", headers: auth_header
+    assert_response :ok
+
+    points = response.parsed_body["data"]
+    assert_equal 3, points.size, "all 3 locations must appear regardless of event type"
+
+    pt_c = points.find { |p| p["locationId"] == point_c.id }
+    assert_not_nil pt_c, "location with only click events must not be dropped from intensity"
+    assert_equal 0, pt_c["entryCount"]
+  end
+
   # ── GET /api/v1/projects/:id/analytics/outside_areas ─────────────────────────
 
   test "outside_areas: returns 401 without auth" do

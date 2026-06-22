@@ -161,10 +161,9 @@ module Api
             "geo_points.name",
             "geo_points.latitude",
             "geo_points.longitude",
-            "COUNT(analytics_events.id) AS entry_count"
+            "COUNT(analytics_events.id) FILTER (WHERE analytics_events.event_type IN (#{entry_events_sql})) AS entry_count"
           )
           .left_joins(:analytics_events)
-          .where("analytics_events.id IS NULL OR analytics_events.event_type IN (#{entry_events_sql})")
           .group("geo_points.id", "geo_points.name", "geo_points.latitude", "geo_points.longitude")
           .order("geo_points.order")
 
