@@ -54,6 +54,12 @@ tags:
       The `id` of each location is the `location_id` required by Presence API calls.
   - name: Presence
     description: Validate geographic presence against location availability rules.
+  - name: Analytics
+    description: |
+      Query historical and live analytics for projects and locations.
+      All endpoints require the `analytics:read` scope.
+      Metrics cover entry events (`radius_enter`, `presence.validated`) and
+      conversion events (`point_click`, `destination.delivered`).
 
 security:
   - basicAuth: []
@@ -592,6 +598,397 @@ paths:
         "422":
           $ref: '#/components/responses/UnprocessableEntity'
 
+  # ── Analytics ─────────────────────────────────────────────────────────────────
+
+  /api/v1/projects/{id}/analytics:
+    get:
+      tags:
+        - Analytics
+      operationId: getProjectAnalyticsSummary
+      summary: Project analytics summary
+      description: |
+        Returns aggregate analytics metrics and current live-visit state for a project.
+
+        Optionally scoped to a single location via `?location_id=`.
+        Date filters apply to the `event_date` field of recorded analytics events.
+
+        **Entry events counted:** `radius_enter`, `presence.validated`.
+        **Conversion events counted:** `point_click`, `destination.delivered`.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - $ref: '#/components/parameters/LocationIdFilter'
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+      responses:
+        "200":
+          description: Analytics summary returned successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AnalyticsSummary'
+              example:
+                data:
+                  summary:
+                    radiusEntries: 3
+                    clicks: 2
+                    conversionPct: 67
+                  liveVisits:
+                    activeNow: 1
+                    mostActiveLocation:
+                      locationId: "660e8400-e29b-41d4-a716-446655440001"
+                      locationName: "Punto Central"
+                      activeNow: 1
+                    lastHourDeltaPct: 15
+                    peakToday:
+                      label: "14:00–15:00"
+                      count: 34
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenAnalytics'
+        "404":
+          description: |
+            Project not found (`"Resource not found"`) or the specified `location_id`
+            does not belong to the project (`"Location not found in this project"`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                project_not_found:
+                  summary: Project not found
+                  value:
+                    error: "Resource not found"
+                location_filter_not_found:
+                  summary: location_id not in project
+                  value:
+                    error: "Location not found in this project"
+
+  /api/v1/projects/{id}/analytics/locations:
+    get:
+      tags:
+        - Analytics
+      operationId: getProjectAnalyticsLocations
+      summary: Per-location analytics breakdown
+      description: |
+        Returns analytics metrics broken down by location (GeoPoint) for the project.
+        Includes all locations, including those with zero events.
+        Results are ordered by each location's configured `order` field.
+
+        Date filters apply to the `event_date` field of recorded events.
+        There is no `location_id` filter on this endpoint — it always returns all locations.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+      responses:
+        "200":
+          description: Per-location analytics returned successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalyticsLocationStat'
+              example:
+                data:
+                  - locationId: "660e8400-e29b-41d4-a716-446655440001"
+                    locationName: "Punto Central"
+                    radiusEntries: 2
+                    clicks: 2
+                    conversionPct: 100
+                    activeNow: 1
+                  - locationId: "660e8400-e29b-41d4-a716-446655440002"
+                    locationName: "Punto Norte"
+                    radiusEntries: 1
+                    clicks: 0
+                    conversionPct: 0
+                    activeNow: 0
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenAnalytics'
+        "404":
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /api/v1/projects/{id}/analytics/distribution:
+    get:
+      tags:
+        - Analytics
+      operationId: getProjectAnalyticsDistribution
+      summary: Event distribution by time and geography
+      description: |
+        Returns event distribution across three dimensions:
+        - **By hour of day** (0–23) — all hours with at least one event.
+        - **By day of week** (0=Sunday, 6=Saturday) — all days with at least one event.
+        - **By geography** — aggregated event counts by country, city, and commune.
+          Only events with a resolved geocoded location are included. Results are
+          sorted descending by count. Each entry includes a `pct` field (percentage
+          of total, rounded).
+
+        Optionally scoped to a single location via `?location_id=`.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - $ref: '#/components/parameters/LocationIdFilter'
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+      responses:
+        "200":
+          description: Distribution data returned successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AnalyticsDistribution'
+              example:
+                data:
+                  byHour:
+                    - hour: 9
+                      count: 5
+                    - hour: 14
+                      count: 12
+                    - hour: 18
+                      count: 3
+                  byDayOfWeek:
+                    - day: 1
+                      count: 7
+                    - day: 3
+                      count: 4
+                    - day: 5
+                      count: 9
+                  geo:
+                    countries:
+                      - label: "Chile"
+                        count: 18
+                        pct: 90
+                      - label: "Argentina"
+                        count: 2
+                        pct: 10
+                    cities:
+                      - label: "Santiago"
+                        count: 15
+                        pct: 75
+                    communes:
+                      - label: "Providencia"
+                        count: 10
+                        pct: 50
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenAnalytics'
+        "404":
+          description: |
+            Project not found or `location_id` does not belong to the project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                project_not_found:
+                  summary: Project not found
+                  value:
+                    error: "Resource not found"
+                location_filter_not_found:
+                  summary: location_id not in project
+                  value:
+                    error: "Location not found in this project"
+
+  /api/v1/projects/{id}/analytics/intensity:
+    get:
+      tags:
+        - Analytics
+      operationId: getProjectAnalyticsIntensity
+      summary: Entry count per location with coordinates
+      description: |
+        Returns the total historical entry count for each location in the project,
+        including the location's coordinates. Useful for building heatmap visualizations.
+
+        Only `radius_enter` and `presence.validated` events are counted.
+        Conversion events (`point_click`, `destination.delivered`) are excluded.
+
+        Results include all locations, ordered by each location's configured `order` field.
+        This endpoint has no query parameters — it always returns the full historical count.
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Intensity data returned successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalyticsIntensityPoint'
+              example:
+                data:
+                  - locationId: "660e8400-e29b-41d4-a716-446655440001"
+                    locationName: "Punto Central"
+                    lat: -33.4372
+                    lng: -70.6506
+                    entryCount: 42
+                  - locationId: "660e8400-e29b-41d4-a716-446655440002"
+                    locationName: "Punto Norte"
+                    lat: -33.4200
+                    lng: -70.6400
+                    entryCount: 17
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenAnalytics'
+        "404":
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /api/v1/projects/{id}/analytics/outside_areas:
+    get:
+      tags:
+        - Analytics
+      operationId: getProjectAnalyticsOutsideAreas
+      summary: GPS activity recorded outside active location boundaries
+      description: |
+        Returns clustered GPS coordinates recorded outside all active GeoPoints of
+        the project. A coordinate is included when no active location's boundary
+        contains it. Inactive locations are never considered for exclusion.
+
+        **Modes:**
+        - `historical` (default) — GPS from `project_location` events with `had_outside_position: true`.
+          Date filters apply.
+        - `live` — current GPS positions from active sessions (`ProjectLiveVisit`).
+          Date filters are ignored.
+
+        Hotspots are grid-clustered at ~11 m precision and sorted descending by count.
+        `intensity` is normalized 0.0–1.0 relative to the hotspot with the highest count.
+        `radiusMeters` is always 8 (display radius for the cluster dot).
+      security:
+        - basicAuth: []
+        - bearerPair: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID of the project.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - historical
+              - live
+            default: historical
+          description: |
+            `historical` — aggregated GPS from past events (default).
+            `live` — current positions from active sessions.
+          example: "historical"
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+      responses:
+        "200":
+          description: Outside areas data returned successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AnalyticsOutsideAreas'
+              examples:
+                historical_with_data:
+                  summary: Historical mode with outside GPS events
+                  value:
+                    data:
+                      mode: "historical"
+                      hotspots:
+                        - lat: -35.0
+                          lng: -59.0
+                          count: 3
+                          intensity: 1.0
+                          radiusMeters: 8
+                        - lat: -35.01
+                          lng: -59.01
+                          count: 1
+                          intensity: 0.3333
+                          radiusMeters: 8
+                      meta:
+                        totalPoints: 5
+                        outsidePoints: 4
+                        activeGeoPointsCount: 2
+                live_empty:
+                  summary: Live mode with no active outside sessions
+                  value:
+                    data:
+                      mode: "live"
+                      hotspots: []
+                      meta:
+                        totalPoints: 0
+                        outsidePoints: 0
+                        activeGeoPointsCount: 2
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/ForbiddenAnalytics'
+        "404":
+          $ref: '#/components/responses/ResourceNotFound'
+
 components:
   securitySchemes:
     basicAuth:
@@ -621,6 +1018,42 @@ components:
         If a completed request with this key exists, the stored response is replayed
         without re-executing side effects. If a request with this key is currently
         in flight, a 409 is returned. Only supported on `POST /api/v1/presence/validate`.
+
+    FromDate:
+      name: from
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+      description: |
+        Start date filter (inclusive), format `YYYY-MM-DD`. Applies to the `event_date`
+        field of recorded analytics events. Invalid values are silently ignored.
+      example: "2025-01-01"
+
+    ToDate:
+      name: to
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+      description: |
+        End date filter (inclusive), format `YYYY-MM-DD`. Applies to the `event_date`
+        field of recorded analytics events. Invalid values are silently ignored.
+      example: "2025-12-31"
+
+    LocationIdFilter:
+      name: location_id
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: |
+        Scope analytics to a single location (GeoPoint). Must belong to the requested
+        project; returns 404 if not found in the project.
+      example: "660e8400-e29b-41d4-a716-446655440001"
 
   schemas:
     # ── Shared ────────────────────────────────────────────────────────────────────
@@ -1292,6 +1725,374 @@ components:
           description: Seconds to wait before retrying.
           example: 30
 
+    # ── Analytics schemas ─────────────────────────────────────────────────────────
+
+    AnalyticsGeoBucket:
+      type: object
+      description: A single geographic bucket (country, city, or commune) with its event share.
+      required:
+        - label
+        - count
+        - pct
+      properties:
+        label:
+          type: string
+          description: Human-readable name of the geographic entity.
+          example: "Chile"
+        count:
+          type: integer
+          description: Number of events attributed to this entity.
+          example: 18
+        pct:
+          type: integer
+          description: Percentage of total events (rounded to nearest integer, 0–100).
+          example: 90
+
+    AnalyticsGeo:
+      type: object
+      description: Event distribution across geographic dimensions.
+      required:
+        - countries
+        - cities
+        - communes
+      properties:
+        countries:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsGeoBucket'
+          description: Events grouped by country, sorted descending by count.
+        cities:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsGeoBucket'
+          description: Events grouped by city, sorted descending by count.
+        communes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsGeoBucket'
+          description: Events grouped by commune (Chilean subdivision), sorted descending by count.
+
+    AnalyticsHourEntry:
+      type: object
+      description: Event count for a specific hour of day.
+      required:
+        - hour
+        - count
+      properties:
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+          description: Hour of day (0–23, UTC).
+          example: 14
+        count:
+          type: integer
+          description: Number of events in this hour.
+          example: 12
+
+    AnalyticsDowEntry:
+      type: object
+      description: Event count for a specific day of week.
+      required:
+        - day
+        - count
+      properties:
+        day:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Day of week (0=Sunday, 6=Saturday).
+          example: 1
+        count:
+          type: integer
+          description: Number of events on this day.
+          example: 7
+
+    AnalyticsDistribution:
+      type: object
+      description: Distribution of events across time-of-day, day-of-week, and geography.
+      required:
+        - byHour
+        - byDayOfWeek
+        - geo
+      properties:
+        byHour:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsHourEntry'
+          description: Hours with at least one event, sorted ascending by hour.
+        byDayOfWeek:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsDowEntry'
+          description: Days of week with at least one event.
+        geo:
+          $ref: '#/components/schemas/AnalyticsGeo'
+
+    AnalyticsPeakToday:
+      type: object
+      description: The busiest one-hour window today (in the project owner's timezone).
+      required:
+        - label
+        - count
+      properties:
+        label:
+          type: string
+          description: Human-readable time window (e.g. `"14:00–15:00"`).
+          example: "14:00–15:00"
+        count:
+          type: integer
+          description: Number of active sessions during this window.
+          example: 34
+
+    AnalyticsMostActiveLocation:
+      type: object
+      description: Location with the highest number of currently active sessions.
+      required:
+        - locationId
+        - locationName
+        - activeNow
+      properties:
+        locationId:
+          type: string
+          format: uuid
+          description: UUID of the location.
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        locationName:
+          type: string
+          description: Name of the location.
+          example: "Punto Central"
+        activeNow:
+          type: integer
+          description: Number of sessions currently active at this location.
+          example: 3
+
+    AnalyticsLiveVisits:
+      type: object
+      description: Current live-visit state for the project.
+      required:
+        - activeNow
+      properties:
+        activeNow:
+          type: integer
+          description: Total number of active sessions across all locations.
+          example: 5
+        mostActiveLocation:
+          description: Location with the most active sessions right now. Absent when `activeNow` is 0.
+          oneOf:
+            - $ref: '#/components/schemas/AnalyticsMostActiveLocation'
+            - type: "null"
+        lastHourDeltaPct:
+          description: |
+            Percentage change in active sessions compared to one hour ago.
+            Positive values mean growth; negative values mean decline.
+            Absent when the previous-hour count is unavailable.
+          oneOf:
+            - type: integer
+            - type: "null"
+          example: 15
+        peakToday:
+          description: |
+            Busiest one-hour window today. Absent when no data is available for today.
+          oneOf:
+            - $ref: '#/components/schemas/AnalyticsPeakToday'
+            - type: "null"
+
+    AnalyticsSummaryMetrics:
+      type: object
+      description: Aggregated entry and conversion metrics.
+      required:
+        - radiusEntries
+        - clicks
+        - conversionPct
+      properties:
+        radiusEntries:
+          type: integer
+          description: Number of radius-entry events (`radius_enter`, `presence.validated`).
+          example: 3
+        clicks:
+          type: integer
+          description: Number of conversion events (`point_click`, `destination.delivered`).
+          example: 2
+        conversionPct:
+          type: integer
+          description: |
+            Conversion rate (unique clickers / unique enterers × 100, rounded).
+            Returns 0 when there are no entries.
+          minimum: 0
+          maximum: 100
+          example: 67
+
+    AnalyticsSummary:
+      type: object
+      description: Project-level analytics summary combining aggregate metrics and live state.
+      required:
+        - summary
+        - liveVisits
+      properties:
+        summary:
+          $ref: '#/components/schemas/AnalyticsSummaryMetrics'
+        liveVisits:
+          $ref: '#/components/schemas/AnalyticsLiveVisits'
+
+    AnalyticsLocationStat:
+      type: object
+      description: Analytics metrics for a single location.
+      required:
+        - locationId
+        - locationName
+        - radiusEntries
+        - clicks
+        - conversionPct
+        - activeNow
+      properties:
+        locationId:
+          type: string
+          format: uuid
+          description: UUID of the location.
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        locationName:
+          type: string
+          description: Name of the location.
+          example: "Punto Central"
+        radiusEntries:
+          type: integer
+          description: Number of entry events for this location.
+          example: 2
+        clicks:
+          type: integer
+          description: Number of conversion events for this location.
+          example: 2
+        conversionPct:
+          type: integer
+          description: Conversion rate (0–100, rounded).
+          minimum: 0
+          maximum: 100
+          example: 100
+        activeNow:
+          type: integer
+          description: Number of sessions currently active at this location.
+          example: 1
+
+    AnalyticsIntensityPoint:
+      type: object
+      description: Entry count and coordinates for a single location. Used for heatmap rendering.
+      required:
+        - locationId
+        - locationName
+        - lat
+        - lng
+        - entryCount
+      properties:
+        locationId:
+          type: string
+          format: uuid
+          description: UUID of the location.
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        locationName:
+          type: string
+          description: Name of the location.
+          example: "Punto Central"
+        lat:
+          type: number
+          format: double
+          description: Latitude of the location center.
+          example: -33.4372
+        lng:
+          type: number
+          format: double
+          description: Longitude of the location center.
+          example: -70.6506
+        entryCount:
+          type: integer
+          description: Total historical entry count (radius_enter + presence.validated).
+          example: 42
+
+    AnalyticsHotspot:
+      type: object
+      description: A clustered outside-area GPS position.
+      required:
+        - lat
+        - lng
+        - count
+        - intensity
+        - radiusMeters
+      properties:
+        lat:
+          type: number
+          format: double
+          description: Latitude of the cluster centroid.
+          example: -35.0
+        lng:
+          type: number
+          format: double
+          description: Longitude of the cluster centroid.
+          example: -59.0
+        count:
+          type: integer
+          description: Number of GPS points in this cluster.
+          example: 3
+        intensity:
+          type: number
+          format: double
+          description: |
+            Normalized intensity relative to the hotspot with the highest count
+            (0.0–1.0, rounded to 4 decimal places). The busiest hotspot always has
+            intensity 1.0.
+          minimum: 0.0
+          maximum: 1.0
+          example: 1.0
+        radiusMeters:
+          type: integer
+          description: Display radius of the cluster dot in meters. Always 8.
+          enum:
+            - 8
+          example: 8
+
+    AnalyticsOutsideMeta:
+      type: object
+      description: Counts summarizing how many GPS points were evaluated.
+      required:
+        - totalPoints
+        - outsidePoints
+        - activeGeoPointsCount
+      properties:
+        totalPoints:
+          type: integer
+          description: Total GPS points evaluated.
+          example: 5
+        outsidePoints:
+          type: integer
+          description: GPS points that fell outside all active location boundaries.
+          example: 4
+        activeGeoPointsCount:
+          type: integer
+          description: Number of active locations used as the exclusion boundaries.
+          example: 2
+
+    AnalyticsOutsideAreas:
+      type: object
+      description: Clustered GPS activity recorded outside active location boundaries.
+      required:
+        - mode
+        - hotspots
+        - meta
+      properties:
+        mode:
+          type: string
+          enum:
+            - historical
+            - live
+          description: The mode that was applied to this response.
+          example: "historical"
+        hotspots:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsHotspot'
+          description: Sorted descending by count. Empty array when no outside activity exists.
+        meta:
+          $ref: '#/components/schemas/AnalyticsOutsideMeta'
+
   responses:
     # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -1345,6 +2146,16 @@ components:
           example:
             error: "insufficient_scope"
             required: "presence:check"
+
+    ForbiddenAnalytics:
+      description: Valid credentials but missing the `analytics:read` scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ScopeErrorResponse'
+          example:
+            error: "insufficient_scope"
+            required: "analytics:read"
 
     # ── Not found ─────────────────────────────────────────────────────────────────
 
