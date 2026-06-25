@@ -33,6 +33,13 @@ info:
 
     Las credenciales se crean y gestionan desde Studio.
 
+    ## Naming conventions
+
+    - **Request fields** (query parameters and request bodies): `snake_case`
+      (e.g. `location_id`, `session_id`, `dwell_elapsed_seconds`).
+    - **Response fields**: `camelCase`
+      (e.g. `locationId`, `sessionId`, `failureReason`).
+
     ## Flujo de integración
 
     Un integrador externo puede obtener el `location_id` requerido por Presence
@@ -1147,7 +1154,11 @@ components:
           description: Optional description of the project.
         status:
           type: string
-          description: Publication status of the project (e.g. `active`, `draft`).
+          enum:
+            - draft
+            - active
+            - inactive
+          description: Publication status of the project.
           example: "active"
         coverImage:
           type:
@@ -1273,13 +1284,19 @@ components:
           type:
             - string
             - "null"
-          description: Daily start time in HH:MM format. `null` when schedule is disabled.
+          description: |
+            Daily start time in `HH:MM` format. The window is evaluated against the
+            timezone of the Presence request's `timestamp` field (UTC if omitted or
+            sent without an offset). `null` when schedule is disabled.
           example: "09:00"
         endTime:
           type:
             - string
             - "null"
-          description: Daily end time in HH:MM format. `null` when schedule is disabled.
+          description: |
+            Daily end time in `HH:MM` format (exclusive — `"18:00"` means up to but
+            not including 18:00). Evaluated against the same timezone as `startTime`.
+            `null` when schedule is disabled.
           example: "18:00"
 
     LocationQuota:
@@ -1543,8 +1560,10 @@ components:
           type: string
           format: date-time
           description: |
-            ISO 8601 timestamp used for schedule evaluation.
-            Defaults to server time if omitted.
+            ISO 8601 timestamp used for schedule evaluation. The timezone offset in
+            the string is respected — send the user's local time with an explicit
+            offset (e.g. `2026-06-19T12:30:00-03:00`) if the location's schedule is
+            configured in local time. Defaults to server UTC time if omitted.
           example: "2026-06-19T15:30:00Z"
         context:
           $ref: '#/components/schemas/PresenceContext'
@@ -1558,9 +1577,12 @@ components:
 
         Conditional fields by feature:
         - `distanceMeters`: only present when `boundaryType` is `radius`.
-        - `quotaAvailable`, `quotaRemaining`: only present when `quota.enabled` is `true`.
+        - `quotaAvailable`, `quotaRemaining`: always present once `scheduleActive` is
+          reached, regardless of whether quota is configured. `quotaRemaining` is
+          `null` when quota is not enabled.
         - `liveVisitsRequired`, `liveVisitsCurrent`: only present when `liveVisitsEnabled` is `true`.
-        - `dwellTimeMet`: only present when `dwellRequired` is `true`.
+        - `dwellTimeMet`: always present once the live visits check is reached,
+          regardless of whether dwell is configured. `true` when `dwellRequired` is `false`.
 
         Checks are evaluated in order: active → boundary → schedule → quota →
         live_visits → dwell. Fields for checks not yet reached are absent.
@@ -1587,10 +1609,16 @@ components:
           description: Whether the location is within its configured operating schedule.
         quotaAvailable:
           type: boolean
-          description: Whether quota is available. Present only when `quota.enabled` is `true`.
+          description: |
+            Whether quota is available. Always present once `scheduleActive` is reached.
+            `true` when quota is not configured (no limit).
         quotaRemaining:
-          type: integer
-          description: Validations remaining in the current quota. Present only when quota is configured.
+          type:
+            - integer
+            - "null"
+          description: |
+            Validations remaining in the current quota. Always present once `scheduleActive`
+            is reached. `null` when quota is not configured.
           example: 9
         liveVisitsEnabled:
           type: boolean
@@ -1616,8 +1644,8 @@ components:
         dwellTimeMet:
           type: boolean
           description: |
-            Whether the dwell time requirement was satisfied.
-            Present only when `dwellRequired` is `true`.
+            Whether the dwell time requirement was satisfied. Always present once the
+            live visits check is reached. `true` when `dwellRequired` is `false`.
 
     Destination:
       type: object
