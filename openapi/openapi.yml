@@ -40,6 +40,21 @@ info:
     - **Response fields**: `camelCase`
       (e.g. `locationId`, `sessionId`, `failureReason`).
 
+    ## Rate limiting
+
+    API v1 applies two independent request limits:
+
+    - **300 requests per minute** per source IP — applies to all `/api/v1/*` paths.
+    - **120 requests per minute** per API credential — applies to all authenticated
+      `/api/v1/*` paths. Does not apply to `GET /api/v1/health`.
+
+    Both limits use a 60-second sliding window and are evaluated independently.
+    A single request can be blocked by either limit.
+
+    When a limit is exceeded, the API returns HTTP 429 with a `Retry-After` header.
+    The API does not emit `X-RateLimit-Limit`, `X-RateLimit-Remaining`, or
+    `X-RateLimit-Reset` headers.
+
     ## Flujo de integración
 
     Un integrador externo puede obtener el `location_id` requerido por Presence
@@ -116,6 +131,8 @@ paths:
               example:
                 status: "ok"
                 version: "v1"
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   # ── Projects ─────────────────────────────────────────────────────────────────
 
@@ -161,6 +178,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         "403":
           $ref: '#/components/responses/ForbiddenProjects'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   /projects/{id}:
     get:
@@ -210,6 +229,8 @@ paths:
           $ref: '#/components/responses/ForbiddenProjects'
         "404":
           $ref: '#/components/responses/ResourceNotFound'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   # ── Locations ─────────────────────────────────────────────────────────────────
 
@@ -327,6 +348,8 @@ paths:
           $ref: '#/components/responses/ForbiddenLocations'
         "404":
           $ref: '#/components/responses/ResourceNotFound'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   /locations/{id}:
     get:
@@ -397,6 +420,8 @@ paths:
           $ref: '#/components/responses/ForbiddenLocations'
         "404":
           $ref: '#/components/responses/ResourceNotFound'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   # ── Presence ──────────────────────────────────────────────────────────────────
 
@@ -559,6 +584,8 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         "422":
           $ref: '#/components/responses/UnprocessableEntity'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   /presence/check:
     post:
@@ -648,6 +675,8 @@ paths:
           $ref: '#/components/responses/LocationNotFound'
         "422":
           $ref: '#/components/responses/UnprocessableEntity'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   # ── Analytics ─────────────────────────────────────────────────────────────────
 
@@ -728,6 +757,8 @@ paths:
                   summary: location_id not in project
                   value:
                     error: "Location not found in this project"
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   /projects/{id}/analytics/locations:
     get:
@@ -789,6 +820,8 @@ paths:
           $ref: '#/components/responses/ForbiddenAnalytics'
         "404":
           $ref: '#/components/responses/ResourceNotFound'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   /projects/{id}/analytics/distribution:
     get:
@@ -884,6 +917,8 @@ paths:
                   summary: location_id not in project
                   value:
                     error: "Location not found in this project"
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   /projects/{id}/analytics/intensity:
     get:
@@ -943,6 +978,8 @@ paths:
           $ref: '#/components/responses/ForbiddenAnalytics'
         "404":
           $ref: '#/components/responses/ResourceNotFound'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
   /projects/{id}/analytics/outside_areas:
     get:
@@ -1039,6 +1076,8 @@ paths:
           $ref: '#/components/responses/ForbiddenAnalytics'
         "404":
           $ref: '#/components/responses/ResourceNotFound'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
 
 components:
   securitySchemes:
@@ -2278,3 +2317,27 @@ components:
             details:
               latitude: "is required"
               session_id: "is required"
+
+    TooManyRequests:
+      description: |
+        Rate limit exceeded. API v1 applies two independent limits:
+        - **300 requests per minute** per source IP (all `/api/v1/*` paths).
+        - **120 requests per minute** per API credential (all authenticated paths;
+          does not apply to `GET /api/v1/health`).
+
+        Both limits use a 60-second window. The `Retry-After` header indicates how
+        many seconds to wait before retrying.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: |
+            Duration in seconds of the throttle window. Current value: 60.
+            Retry only after this period has elapsed.
+          example: 60
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Demasiadas solicitudes. Intenta nuevamente más tarde."
