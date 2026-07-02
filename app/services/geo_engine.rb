@@ -73,27 +73,34 @@ module GeoEngine
       av = location.availability || {}
       return true unless av["schedule_enabled"]
 
-      days = av["schedule_days"] || []
+      today = valid_local_day?(local_day) ? local_day : WEEK_DAYS[at.wday]
 
-      today = if valid_local_day?(local_day)
-        local_day
-      else
-        WEEK_DAYS[at.wday]
-      end
+      rules = av["schedule_rules"]
 
-      return false if days.any? && !days.include?(today)
+      if rules.is_a?(Array) && rules.any?
+        # Per-day format: each rule covers one day with its own start/end window.
+        rule = rules.find { |r| r["day"] == today }
+        return false unless rule
 
-      st = av["schedule_start_time"]
-      et = av["schedule_end_time"]
-
-      if st && et
-        cur = if valid_local_time?(local_time)
-          local_time
-        else
-          at.strftime("%H:%M")
+        start_t = rule["start"]
+        end_t   = rule["end"]
+        if start_t && end_t
+          cur = valid_local_time?(local_time) ? local_time : at.strftime("%H:%M")
+          # Open window is [start, end) — exclusive end time.
+          return false if cur < start_t || cur >= end_t
         end
-        # Open window is [start, end) — exclusive end time.
-        return false if cur < st || cur >= et
+      else
+        # Legacy flat format: a shared time window across selected days.
+        days = av["schedule_days"] || []
+        return false if days.any? && !days.include?(today)
+
+        st = av["schedule_start_time"]
+        et = av["schedule_end_time"]
+        if st && et
+          cur = valid_local_time?(local_time) ? local_time : at.strftime("%H:%M")
+          # Open window is [start, end) — exclusive end time.
+          return false if cur < st || cur >= et
+        end
       end
 
       true

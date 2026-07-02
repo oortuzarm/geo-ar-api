@@ -91,6 +91,56 @@ class GeoEngineTest < ActiveSupport::TestCase
                                       local_day: "Lun", local_time: "15:00")
   end
 
+  # ── Schedule (per-day schedule_rules format) ──────────────────────────────
+
+  test "schedule_active? returns true when day has a rule and time is within window" do
+    point = build_geo_point_with_schedule_rules(
+      enabled: true,
+      rules: [
+        { "day" => "Lun", "start" => "09:00", "end" => "18:00" },
+        { "day" => "Mar", "start" => "10:00", "end" => "20:00" }
+      ]
+    )
+    monday_at_noon = Time.new(2026, 6, 1, 12, 0, 0)
+    assert GeoEngine.schedule_active?(point, at: monday_at_noon, local_day: "Lun", local_time: "12:00")
+  end
+
+  test "schedule_active? returns false when today has no rule in schedule_rules" do
+    point = build_geo_point_with_schedule_rules(
+      enabled: true,
+      rules: [{ "day" => "Lun", "start" => "09:00", "end" => "18:00" }]
+    )
+    tuesday = Time.new(2026, 6, 2, 12, 0, 0)
+    refute GeoEngine.schedule_active?(point, at: tuesday, local_day: "Mar", local_time: "12:00")
+  end
+
+  test "schedule_active? returns false when time is outside the day rule window" do
+    point = build_geo_point_with_schedule_rules(
+      enabled: true,
+      rules: [{ "day" => "Lun", "start" => "09:00", "end" => "18:00" }]
+    )
+    refute GeoEngine.schedule_active?(point, at: Time.new(2026, 6, 1, 0, 0, 0),
+                                      local_day: "Lun", local_time: "08:30")
+  end
+
+  test "schedule_active? returns true at exact start of day rule window" do
+    point = build_geo_point_with_schedule_rules(
+      enabled: true,
+      rules: [{ "day" => "Lun", "start" => "09:00", "end" => "18:00" }]
+    )
+    assert GeoEngine.schedule_active?(point, at: Time.new(2026, 6, 1, 0, 0, 0),
+                                      local_day: "Lun", local_time: "09:00")
+  end
+
+  test "schedule_active? returns false at exact end of day rule window (exclusive)" do
+    point = build_geo_point_with_schedule_rules(
+      enabled: true,
+      rules: [{ "day" => "Lun", "start" => "09:00", "end" => "18:00" }]
+    )
+    refute GeoEngine.schedule_active?(point, at: Time.new(2026, 6, 1, 0, 0, 0),
+                                      local_day: "Lun", local_time: "18:00")
+  end
+
   # ── Quota ──────────────────────────────────────────────────────────────────
 
   test "quota_available? returns true when quota not active" do
@@ -148,8 +198,15 @@ class GeoEngineTest < ActiveSupport::TestCase
       "schedule_start_time" => start,
       "schedule_end_time"   => finish
     }
-    p = GeoPoint.new(latitude: 0, longitude: 0, availability: av)
-    p
+    GeoPoint.new(latitude: 0, longitude: 0, availability: av)
+  end
+
+  def build_geo_point_with_schedule_rules(enabled:, rules:)
+    av = {
+      "schedule_enabled" => enabled,
+      "schedule_rules"   => rules
+    }
+    GeoPoint.new(latitude: 0, longitude: 0, availability: av)
   end
 
   def build_geo_point_with_quota(enabled:, limit: nil, used: 0)

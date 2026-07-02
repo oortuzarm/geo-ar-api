@@ -254,7 +254,8 @@ module Api
             :schedule_enabled, :quota_enabled, :quota_limit, :quota_used,
             :schedule_start_time, :schedule_end_time,
             :live_visits_enabled, :live_visits_minimum,
-            schedule_days: []
+            schedule_days: [],
+            schedule_rules: [:day, :start, :end]
           ]
         ],
       )
